@@ -27,9 +27,9 @@ Guardrails, not a spec: progressive disclosure (show the minimum needed to decid
 - `npm run typecheck` — type check
 - `npm run dev:session` — refresh Phase 0 dev-identity test JWTs (see `.claude/rules/auth-security.md`)
 
-## Project Phases
+## Project Phases & Status
 
-See `2026-07-06-trace-dashboard-kickoff-guide.md` for the full phase breakdown (Phase 0 walking skeleton → Phase 1 revenue overview → Phase 2 multi-tenant client auth → Phase 3 funnel/attribution → Phase 4 polish). Currently in Phase 0.
+**Read `docs/STATUS.md` first in any new session** — it has the current phase, infra inventory (Supabase/Vercel/GitHub), and known-temporary things. Full phase breakdown and "done when" criteria: `docs/deliverables/2026-07-06-trace-dashboard-kickoff-guide.md`. System overview/data flow: `docs/architecture.md`. Why non-obvious decisions were made: `docs/adr/`.
 
 @.claude/rules/data-model.md
 @.claude/rules/invariants.md

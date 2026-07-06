@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { getDevJwt } from "@/lib/auth/dev-identity";
+import { getCurrentDevJwt } from "@/lib/auth/dev-identity";
 
 export function createClientWithJwt(jwt?: string) {
   return createClient(
@@ -11,6 +11,6 @@ export function createClientWithJwt(jwt?: string) {
   );
 }
 
-export function createServerClient() {
-  return createClientWithJwt(getDevJwt());
+export async function createServerClient() {
+  return createClientWithJwt(await getCurrentDevJwt());
 }

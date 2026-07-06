@@ -17,9 +17,9 @@ Two audiences: **Admin** (Sharan, full access across every client) and **Trace c
 - Phase 0's admin-bypass stub and Phase 2's real client login share this same mechanism — don't build a second, parallel way to inject claims.
 
 ## Phase 0 dev-identity stub
-- `src/lib/auth/dev-identity.ts` reads `DEV_ROLE=admin` or `DEV_CLIENT_ID=<uuid>` from env and selects a pre-obtained test-user session JWT (`DEV_ADMIN_JWT` / `DEV_CLIENT_JWT`).
-- Get fresh session JWTs (they expire ~1hr) by running `npm run dev:session` (`scripts/get-dev-session.ts`) — signs in as the two Phase 0 test users using the publishable key only, no secret key involved.
-- This stub is temporary. Once Phase 2 ships real Supabase Auth login, replace `getDevJwt()`'s callers with the real session, and delete the dev-identity files.
+- `src/lib/auth/dev-identity.ts` reads `DEV_ROLE=admin` or `DEV_CLIENT_ID=<uuid>` from env (`getCurrentDevJwt()`) and resolves it to a session JWT for one of two fixed Phase 0 test users, via `signInWithPassword` (publishable key only, no secret key involved).
+- Sessions are signed in lazily and cached in memory per role (`getDevJwt(role)`), refreshed automatically ~60s before expiry. No manual token minting, no `.env.local`/Vercel env var updates required — see `docs/adr/003-lazy-session-refresh-for-dev-identity-stub.md`.
+- This stub is temporary. Once Phase 2 ships real Supabase Auth login, replace `getDevJwt()`/`getCurrentDevJwt()`'s callers with the real session, and delete the dev-identity files.
 
 ## Never do this
 - Never use a manually-signed JWT / legacy shared JWT secret to fabricate claims — this project uses Supabase's own Auth + Custom Access Token Hook exclusively, matching Trace's own migration to modern publishable/secret keys.

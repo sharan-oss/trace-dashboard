@@ -1,6 +1,8 @@
 import { createClientWithJwt } from "@/lib/supabase/server";
+import { getDevJwt } from "@/lib/auth/dev-identity";
 
-async function getPaymentsCount(jwt?: string) {
+async function getPaymentsCount(role: "admin" | "client") {
+  const jwt = await getDevJwt(role);
   const supabase = createClientWithJwt(jwt);
   const { count, error } = await supabase
     .from("payments")
@@ -11,8 +13,8 @@ async function getPaymentsCount(jwt?: string) {
 
 export default async function Home() {
   const [admin, client] = await Promise.all([
-    getPaymentsCount(process.env.DEV_ADMIN_JWT),
-    getPaymentsCount(process.env.DEV_CLIENT_JWT),
+    getPaymentsCount("admin"),
+    getPaymentsCount("client"),
   ]);
 
   return (

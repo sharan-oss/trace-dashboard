@@ -18,7 +18,7 @@ Updated at the end of each phase (not each session — see `memory.md` / `/remem
   - Custom Access Token Hook live and enabled (`supabase/migrations/20260707000001_custom_access_token_hook.sql` + Dashboard toggle) — see `docs/adr/001-publishable-key-and-custom-access-token-hook.md`
   - Env-driven dev-identity stub working (`src/lib/auth/dev-identity.ts`) — see `docs/adr/002-env-driven-dev-identity-stub.md` and `docs/adr/003-lazy-session-refresh-for-dev-identity-stub.md`
   - Proof page (`src/app/page.tsx`) verified live: admin JWT saw 132 payments, scoped test-client JWT saw 121, cross-checked against a raw SQL count on the live table
-- [ ] **Phase 1 — Revenue overview (admin)**: total revenue, per-client/per-product breakdown, conversion rate, `paid_at`-based time series. Not started.
+- [ ] **Phase 1 — Revenue overview (admin)**: total revenue, per-client/per-product breakdown, conversion rate, `paid_at`-based time series. Not started. Visual design system prerequisite complete (see spec/plan above); Phase 1 feature work itself has not started.
 - [ ] **Phase 2 — Multi-tenant client auth**: real Supabase Auth login (magic link or email/password), replacing the Phase 0 dev-identity stub. Not started.
 - [ ] **Phase 3 — Funnel & attribution views**: ordered funnel drop-off, UTM/attribution breakdown, device/network breakdown. Not started.
 - [ ] **Phase 4 — Polish pass**: empty states, loading states, responsive pass, nav review. Not started.
@@ -32,4 +32,4 @@ Updated at the end of each phase (not each session — see `memory.md` / `/remem
 
 ## Open questions
 
-- Chart library, color system, and component-level visual design for Phase 1 are explicitly undeferred — bring options to Sharan first per `.claude/rules/workflow.md`, don't default to a library from training data.
+- Visual design system (navy ink, off-white canvas, bento grid, semantic colors, Geist/Inter typography) is decided and implemented — see `docs/superpowers/specs/2026-08-08-visual-design-system.md` and `docs/superpowers/plans/2026-08-08-visual-design-system-implementation.md`. Chart library choice (shadcn charts on Recharts) is also decided per that spec. Still open: the chart/data-viz categorical color palette for multi-series charts, and dark mode — both explicitly deferred in the spec.

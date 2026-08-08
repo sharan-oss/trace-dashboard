@@ -1,7 +1,7 @@
 # Visual Design System — Trace Dashboard
 
-Date: 2026-08-08
-Status: Approved by Sharan (brainstorm session), pending Phase 1 implementation
+Date: 2026-08-08 (updated 2026-08-08 after implementation to record two decisions made during build — see "Decisions confirmed during implementation" below)
+Status: Approved by Sharan, implemented on `worktree-visual-design-system`
 
 ## Why
 
@@ -42,6 +42,9 @@ revenue/funnel/attribution data (the actual content) stays legible and trustwort
 | `--canvas` | `#FAFAFA` | Page background. Off-white, not pure white — reduces harshness, gives tiles something to sit visibly above. |
 | `--tile-bg` | `#FFFFFF` | Bento tile background (one step lighter than canvas). |
 | `--border` | `rgba(16, 28, 52, 0.10)` (flat equivalent ≈ `#E2E5EB`) | 1px hairline border on every tile. Derived from the ink color rather than a generic gray, so structure still carries the brand undertone. |
+| `--secondary` / `--muted` | `oklch(0.96 0.010 262.971)` ≈ `#EEF2F9` | Secondary/hover surfaces required by shadcn's token system. Not in the original token table — added during implementation (see "Decisions confirmed during implementation"). Navy-tinted rather than neutral gray, extending the same principle as `--border`. |
+| `--accent` | `oklch(0.94 0.014 262.971)` ≈ `#E6EBF5` | Active/hover-emphasis surface, one step more saturated than `--secondary`/`--muted`. Added during implementation, same rationale as above. |
+| `--muted-foreground` | `oklch(0.229 0.050 262.971 / 65%)` — `--ink` at reduced opacity, not a separate gray token | Secondary/caption text (timestamps, labels). Resolves the "Open questions" item below: implemented at 65% (not the originally-proposed 60%, which measured 4.44:1 against canvas — below the AA bar) after a whole-branch review caught the contrast miss; 65% clears ~5.22:1 on canvas / ~5.34:1 on card. |
 
 **Contrast check** (WCAG 2.2, computed): `--ink` on `--canvas` = **16.26:1**, `--ink` on
 `--tile-bg` = **16.97:1** — both pass AA and AAA for text by a wide margin. The border
@@ -89,9 +92,12 @@ fintech) — not an arbitrary pick.
   single KPIs.
 - **Spacing**: 4px base unit (`4, 8, 12, 16, 24, 32, 48, 64`), consistent with Tailwind's
   default scale. Gutters between tiles: 16–24px.
-- **Radius**: tiles use a soft-but-not-heavy corner radius (`12px` / Tailwind `rounded-xl`);
-  inner elements (badges, buttons) use a slightly tighter radius (`8px` / `rounded-lg`) so
-  tiles read as the "outer" container.
+- **Radius**: tiles use a soft-but-not-heavy corner radius (`~11px` / Tailwind `rounded-xl`,
+  derived from `--radius: 0.5rem` — chosen during implementation so `rounded-lg` lands at
+  exactly `8px`, see below); inner elements like buttons use `8px` / `rounded-lg`. Status
+  badges (`StatusBadge`) use `rounded-full` (pill-shaped) instead of `rounded-lg` — a
+  deliberate deviation from the original "tighter radius" guidance, confirmed during
+  implementation (see "Decisions confirmed during implementation").
 - **No shadows anywhere.** Hairline borders (see color tokens) are the only separation
   mechanism.
 - Exact per-component sizing (tile min/max widths, responsive breakpoints) is left to
@@ -124,11 +130,23 @@ as inspiration without adopting the library itself.
   than a pure tone-step for this use case.
 - **Soft shadows** for tile elevation — rejected as dated/template-y.
 
+## Decisions confirmed during implementation (2026-08-08)
+
+Two things this spec left ambiguous were resolved while building the first real components,
+then approved by Sharan after the fact rather than re-litigated in advance — recorded here so
+this doc stays the accurate source of truth rather than only the pre-implementation intent:
+
+- **`StatusBadge` uses `rounded-full`, not `rounded-lg`.** The original "inner elements use
+  a tighter radius" guidance was written before any badge existed; once built, a pill shape
+  read better for a small status indicator than the tile's own corner radius would have.
+  Confirmed as the kept direction — not something to "fix" back to `rounded-lg`.
+- **Four additional surface tokens** (`--secondary`/`--muted`, `--accent`, `--muted-foreground`)
+  were added beyond the original four structural tokens, because shadcn's component system
+  requires those slots to exist. They follow the same "derive from ink, not generic gray"
+  principle as `--border` rather than introducing a separate neutral-gray family. Values are
+  in the Structural token table above.
+
 ## Open questions for Phase 1 implementation (not blocking this spec)
 
 - Chart categorical palette (see "Explicitly deferred" above).
 - Exact bento tile sizing/breakpoint rules.
-- Whether any secondary/tertiary text tone (e.g. a muted gray for timestamps/captions) is
-  needed alongside `--ink` at full opacity — likely yes, propose `--ink` at reduced opacity
-  (e.g. 60%) rather than a separate gray token, to stay consistent with the single-ink-color
-  principle. To be confirmed against real content during implementation.

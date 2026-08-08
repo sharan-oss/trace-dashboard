@@ -145,6 +145,9 @@ describe(`${VIEW} — key resolution`, () => {
       .eq("ad_key_type", "ad_name")
       .limit(2000);
     if (error) throw new Error(error.message);
+    // Without this, the assertion below is vacuously true the moment name
+    // matching stops resolving any row at all.
+    expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) expect(row.ad_id).toBeNull();
   });
 });

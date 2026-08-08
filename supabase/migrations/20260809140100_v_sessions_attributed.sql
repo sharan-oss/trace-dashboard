@@ -14,11 +14,14 @@
 --
 -- WHY THE NAME MATCH IS SCOPED: ad names are not unique. 14 of Love School's
 -- 49 names are reused across ads, and one name is duplicated inside a single
--- campaign. name_in_campaign therefore keeps only names mapping to exactly one
--- ad within one campaign for one client; anything ambiguous resolves nothing
--- and lands in the ad-level Unattributed bucket rather than being guessed.
--- The client_id in the grouping key matters: without it an admin, who can see
--- every client's ads, could match one client's name against another's ad.
+-- campaign. public.v_ad_name_resolution (see its own migration) keeps only
+-- names mapping to exactly one ad within one campaign for one client;
+-- anything ambiguous resolves nothing and lands in the ad-level Unattributed
+-- bucket rather than being guessed. The client_id in its grouping key
+-- matters: without it an admin, who can see every client's ads, could match
+-- one client's name against another's ad. That view is a standalone,
+-- directly-testable unit rather than an inline CTE here so both guards have
+-- their own test coverage independent of session data.
 --
 -- EVERY JOIN TO ads IS A LEFT JOIN. A client with no seeded ads (Occultyogis
 -- today) must still resolve ad keys from extraction; only the display names and
@@ -26,14 +29,7 @@
 -- deduplicated keys, so neither can multiply rows.
 create or replace view public.v_sessions_attributed
 with (security_invoker = true) as
-with name_in_campaign as (
-  select client_id, meta_campaign_id, ad_name, min(meta_ad_id) as meta_ad_id
-  from public.ads
-  where ad_name is not null and meta_campaign_id is not null
-  group by client_id, meta_campaign_id, ad_name
-  having count(distinct meta_ad_id) = 1
-),
-resolved as (
+with resolved as (
   select
     s.*,
     coalesce(s.ad_id, public.metric_ad_id_from_url(s.landing_url)) as ad_id_resolved,
@@ -47,7 +43,7 @@ keyed as (
     r.*,
     nic.meta_ad_id as ad_id_from_name
   from resolved r
-  left join name_in_campaign nic
+  left join public.v_ad_name_resolution nic
     on r.ad_id_resolved is null
    and nic.client_id = r.client_id
    and nic.meta_campaign_id = r.campaign_id_resolved

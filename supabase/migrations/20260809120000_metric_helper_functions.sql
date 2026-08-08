@@ -13,10 +13,12 @@
 -- The ad-identifier key variants, as one pattern used by both the URL side
 -- (sessions.landing_url, where a space is encoded as `+` or `%20`) and the
 -- jsonb side (payments.utm_params, where keys are already decoded).
--- Covers: h_ad_id, ad_id, Ad_id, Ad ID, Ad+ID, Ad%20ID, adid.
+-- Covers: h_ad_id, ad_id, Ad_id, Ad ID, Ad+ID, Ad%20ID, Ad%2BID (double-encoded
+-- `+`, confirmed real by the sibling `Adset%2Bcontent` key on the same
+-- client), adid.
 create or replace function public.metric_ad_id_key_pattern()
 returns text language sql immutable parallel safe as $$
-  select '(?:h_ad_id|ad(?:_|\+|%20|\s)?id)'
+  select '(?:h_ad_id|ad(?:_|\+|%20|%2b|\s)?id)'
 $$;
 
 -- A Meta ad identifier is always a long integer. Anything else is junk:
@@ -52,16 +54,21 @@ returns text language sql immutable parallel safe as $$
   )
 $$;
 
--- First ad identifier in a URL query string, or null.
+-- First ad identifier in a URL query string, or null. Scans every occurrence
+-- of the key pattern and returns the first one that normalizes to a valid ad
+-- id, mirroring metric_ad_id_from_params below: a junk match earlier in the
+-- string (an unexpanded macro, a stray param) must not shadow a valid one
+-- later in it.
 create or replace function public.metric_ad_id_from_url(url text)
 returns text language sql immutable parallel safe as $$
-  select public.metric_normalize_ad_id(
-    (regexp_match(
-      url,
-      '[?&]' || public.metric_ad_id_key_pattern() || '=([^&#]*)',
-      'i'
-    ))[1]
-  )
+  select public.metric_normalize_ad_id(m[1])
+  from regexp_matches(
+    url,
+    '[?&]' || public.metric_ad_id_key_pattern() || '=([^&#]*)',
+    'gi'
+  ) as m
+  where public.metric_normalize_ad_id(m[1]) is not null
+  limit 1
 $$;
 
 -- First ad identifier among the jsonb keys, or null. Only keys matching the

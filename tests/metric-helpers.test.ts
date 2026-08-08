@@ -56,6 +56,24 @@ describe("metric_ad_id_from_url", () => {
       await rpc("metric_ad_id_from_url", { url: "https://x.com/?utm_source=fb" })
     ).toBeNull();
   });
+
+  it("skips an earlier junk match to find a valid ad id later in the query string", async () => {
+    // A prior implementation took the first *key* match and normalized
+    // afterwards, so a junk first occurrence (the unexpanded macro) shadowed
+    // the valid h_ad_id later in the string. It must scan every match, like
+    // metric_ad_id_from_params does over jsonb keys.
+    expect(
+      await rpc("metric_ad_id_from_url", {
+        url: "https://x.com/?utm_term=999&Ad+ID=%7b%7bad.id%7d%7d&h_ad_id=120111222333",
+      })
+    ).toBe("120111222333");
+  });
+
+  it("extracts a double-encoded 'Ad%2BID' key", async () => {
+    expect(
+      await rpc("metric_ad_id_from_url", { url: "https://x.com/?Ad%2BID=120333444555" })
+    ).toBe("120333444555");
+  });
 });
 
 describe("metric_ad_id_from_params", () => {
@@ -70,6 +88,12 @@ describe("metric_ad_id_from_params", () => {
       await rpc("metric_ad_id_from_params", {
         params: { fbc_id: "120555", h_ad_id: "120246979966760" },
       })
+    ).toBe("120246979966760");
+  });
+
+  it("reads an 'Ad_id' key (the shape on 224 live payments rows)", async () => {
+    expect(
+      await rpc("metric_ad_id_from_params", { params: { Ad_id: "120246979966760" } })
     ).toBe("120246979966760");
   });
 
@@ -97,6 +121,48 @@ describe("metric_campaign_id_from_url", () => {
     expect(
       await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=june-test-01" })
     ).toBe("june-test-01");
+  });
+
+  // metric_campaign_id_from_url has no numeric guard (unlike the ad id path),
+  // so metric_normalize_key's junk filter is the only thing standing between
+  // these values and a phantom campaign in every breakdown. Each case below
+  // fails if the corresponding branch in metric_normalize_key is removed.
+  it("rejects an unexpanded {{campaign.id}} macro", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id={{campaign.id}}" })
+    ).toBeNull();
+  });
+
+  it("rejects the URL-encoded %7b%7b macro form", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", {
+        url: "https://x.com/?utm_id=%7b%7bcampaign.id%7d%7d",
+      })
+    ).toBeNull();
+  });
+
+  it("rejects the literal string 'null'", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=null" })
+    ).toBeNull();
+  });
+
+  it("rejects the literal string 'undefined'", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=undefined" })
+    ).toBeNull();
+  });
+
+  it("rejects the literal string '_removed_'", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=_removed_" })
+    ).toBeNull();
+  });
+
+  it("rejects an empty value", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=" })
+    ).toBeNull();
   });
 });
 

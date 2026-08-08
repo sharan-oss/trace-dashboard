@@ -1165,16 +1165,30 @@ git commit -m "feat(db): add v_sessions_attributed with three-tier attribution"
 The same three-tier resolution over payments, sourcing from `utm_params` instead of a URL, plus the test-row marking.
 
 **Files:**
-- Create: `supabase/migrations/20260809140200_v_payments_attributed.sql`
+- Rename: `supabase/migrations/20260809140200_v_ad_name_resolution.sql` → `supabase/migrations/20260809140050_v_ad_name_resolution.sql`
+- Create: `supabase/migrations/20260809140300_v_payments_attributed.sql`
 - Create: `tests/v-payments-attributed.test.ts`
 
+- [ ] **Step 0: Fix the migration ordering bug left by Task 4**
+
+`v_sessions_attributed` (`20260809140100`) joins `v_ad_name_resolution`, but that view was created at `20260809140200` — later in the sequence. The live database is fine, because the objects were applied in dependency order by hand, but replaying this directory from scratch into a fresh environment would fail on `20260809140100` with "relation v_ad_name_resolution does not exist".
+
+Rename the file so the sequence matches the dependency:
+
+```bash
+git mv supabase/migrations/20260809140200_v_ad_name_resolution.sql \
+       supabase/migrations/20260809140050_v_ad_name_resolution.sql
+```
+
+Change no SQL inside it and do not re-apply it — this is a local filename fix only. Confirm the resulting order is: `140000` helpers, `140050` name resolution, `140100` sessions, `140300` payments.
+
 **Interfaces:**
-- Consumes: every `public.metric_*` function from Tasks 2 and 3; `public.ads`; `public.clients` (for one derived boolean only).
+- Consumes: every `public.metric_*` function from Tasks 2 and 3; `public.ads`; `public.v_ad_name_resolution` (the shared campaign-scoped unique-ad-name rule, extracted during Task 4 — join it, never re-inline the CTE, or the two views can drift apart on the rule that decides whether a name is safe to trust); `public.clients` (for one derived boolean only).
 - Produces: view `public.v_payments_attributed` — all `payments` columns plus `utm_source_clean text`, `ad_key text`, `ad_key_type text`, `adset_key text`, `campaign_key text`, `attribution_tier text`, `ad_name text`, `adset_name text`, `campaign_name text`, `is_paid boolean`, `is_test_payment boolean`, `is_test_client boolean`, `day_ist date`.
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809140200_v_payments_attributed.sql`:
+`supabase/migrations/20260809140300_v_payments_attributed.sql`:
 
 ```sql
 -- Three-tier attributed read layer over payments. Mirrors
@@ -1202,14 +1216,7 @@ The same three-tier resolution over payments, sourcing from `utm_params` instead
 -- are badged, never filtered.
 create or replace view public.v_payments_attributed
 with (security_invoker = true) as
-with name_in_campaign as (
-  select client_id, meta_campaign_id, ad_name, min(meta_ad_id) as meta_ad_id
-  from public.ads
-  where ad_name is not null and meta_campaign_id is not null
-  group by client_id, meta_campaign_id, ad_name
-  having count(distinct meta_ad_id) = 1
-),
-resolved as (
+with resolved as (
   select
     p.*,
     coalesce(p.ad_id, public.metric_ad_id_from_params(p.utm_params)) as ad_id_resolved,
@@ -1223,7 +1230,7 @@ keyed as (
     r.*,
     nic.meta_ad_id as ad_id_from_name
   from resolved r
-  left join name_in_campaign nic
+  left join public.v_ad_name_resolution nic
     on r.ad_id_resolved is null
    and nic.client_id = r.client_id
    and nic.meta_campaign_id = r.campaign_id_resolved
@@ -1483,7 +1490,7 @@ Expected: PASS.
 
 ```bash
 npm run typecheck
-git add supabase/migrations/20260809140200_v_payments_attributed.sql tests/v-payments-attributed.test.ts
+git add supabase/migrations/20260809140050_v_ad_name_resolution.sql supabase/migrations/20260809140300_v_payments_attributed.sql tests/v-payments-attributed.test.ts
 git commit -m "feat(db): add v_payments_attributed with three-tier attribution"
 ```
 
@@ -1494,7 +1501,7 @@ git commit -m "feat(db): add v_payments_attributed with three-tier attribution"
 Unchanged in substance by the revision — the funnel does not touch attribution. Renumbered only.
 
 **Files:**
-- Create: `supabase/migrations/20260809140300_v_funnel_by_session.sql`
+- Create: `supabase/migrations/20260809140400_v_funnel_by_session.sql`
 - Create: `tests/v-funnel-by-session.test.ts`
 
 **Interfaces:**
@@ -1502,7 +1509,7 @@ Unchanged in substance by the revision — the funnel does not touch attribution
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809140300_v_funnel_by_session.sql`:
+`supabase/migrations/20260809140400_v_funnel_by_session.sql`:
 
 ```sql
 -- One row per session with a boolean per funnel stage, computed as "reached
@@ -1646,7 +1653,7 @@ Expected: PASS.
 
 ```bash
 npm run typecheck
-git add supabase/migrations/20260809140300_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
+git add supabase/migrations/20260809140400_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
 git commit -m "feat(db): add v_funnel_by_session with reached-or-beyond semantics"
 ```
 

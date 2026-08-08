@@ -18,6 +18,8 @@ Satisfies **AC-7** to **AC-15** from [index.md](index.md).
 
 Full column list in [index.md](index.md). Four tables: `ad_accounts`, `ads`, `ad_insights_daily`, `sync_runs`. Every one carries `client_id` so row level security is a direct column check with no join.
 
+**`ads` already exists** (created and seeded 2026-08-09, migrations `ads_dimension_table` and `seed_love_school_ads`, as part of the Love School normalisation). Its 67 Love School rows came from a manual Ads Manager export and carry Meta's exported status values verbatim (`active`, `not_delivering`, `inactive`) with `last_synced_at` null. The sync upserts on `meta_ad_id`: it adopts these rows, refreshes names and status, fills `ad_account_id` (the foreign key to `ad_accounts` is added in this child's migration since that table did not exist yet), sets `last_synced_at`, and adds creative paths. Until a client's account is synced, a fresh manual export seeded the same way is the supported path for new clients.
+
 Row level security reads copy `supabase/migrations/20260707000000_dashboard_rls_policies.sql`: `client_id` matching the JWT claim, OR the `is_admin` claim. Unlike Trace's read only tables, these four also need deliberate write policies: `WITH CHECK` on insert and update permitting rows only when the JWT carries `is_admin`. A `USING` only policy denies writes outright in Postgres, and the service role key inside a request handler is forbidden by `.claude/rules/auth-security.md`, so the sync authenticates as the existing admin identity and writes under these policies.
 
 The unique constraint on `ad_insights_daily(ad_id, date_start)` is what makes the sync idempotent. Every write is an upsert on that key.

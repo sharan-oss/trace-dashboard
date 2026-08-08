@@ -18,6 +18,7 @@ The load bearing choice is that Trace's own payment records are the single sourc
 | [01-metrics-foundation.md](01-metrics-foundation.md) | Read layer views over existing tables: UTM normalization, Test marking, the two conversion rates, and the canonical ad key | Makes existing data trustworthy. No Meta dependency, buildable now |
 | [02-meta-ads-sync.md](02-meta-ads-sync.md) | Four new tables, the Meta API client, the nightly sync and backfill, creative mirroring | Brings spend and creative images into the database |
 | [03-ads-ui.md](03-ads-ui.md) | The Ads section: campaign to ad set to ad drill down, ROAS and CPA, reconciliation rows | Presents the joined result to admin and clients |
+| [04-utm-template-standard.md](04-utm-template-standard.md) | The one Ads Manager URL template for every client, the ban on `&` in Meta names, and the manual export seed path | Makes future data arrive clean at the source, so the read layer stops repairing |
 
 Reasoning and options: see [rationale.md](rationale.md).
 
@@ -25,7 +26,7 @@ Reasoning and options: see [rationale.md](rationale.md).
 
 These three points bind the children together. Change one and all three specs need revisiting.
 
-1. **The join has two tiers, both produced by child 01 and only consumed by child 03.** Tier one matches the canonical ad key against `ads.meta_ad_id` (or, for name matches, against `ads.ad_name`). Tier two matches `campaign_key` against `ads.meta_campaign_id` for rows that resolve no ad key, so a row can be attributed at campaign level while unattributed at ad level. Child 01 owns key derivation; child 02 owns filling the Meta identifiers; child 03 never re derives either tier.
+1. **The join has three tiers, all produced by child 01 and only consumed by child 03.** Tier one matches the canonical ad key against `ads.meta_ad_id`; a name only match resolves through `ads` when the name is unique within the row's campaign (ad names are proven non unique, so unscoped name matching is forbidden). Tier two matches `adset_key` against `ads.meta_adset_id` for rows resolving no ad. Tier three matches `campaign_key` against `ads.meta_campaign_id` for the rest, so a row can be attributed at a coarser level while unattributed at a finer one. Child 01 owns key derivation; child 02 owns keeping `ads` fresh (the table already exists, created and seeded 2026-08-09); child 03 never re derives any tier. The stored `campaign_id` / `adset_id` / `ad_id` columns on `sessions` and `payments` (Love School backfilled once, 2026-08-09) are read first; extraction is the bridge for rows without them.
 2. **Money is always stored and passed in minor units (paise) as an integer**, matching the existing `payments.amount` convention. `ad_insights_daily.spend_minor` follows the same rule. No float currency anywhere.
 3. **A day means an Asia/Kolkata calendar day** in every view, table and query across all three children. Spend and revenue must bucket identically or daily ROAS is meaningless.
 
@@ -43,7 +44,7 @@ These three points bind the children together. Change one and all three specs ne
 - **AC-1**: A `utm_source` value carrying a stray `utm_source=` prefix aggregates together with its clean equivalent, displayed under the clean label (so `METAxAM` and `utm_source=METAxAM` become one `METAxAM` row).
 - **AC-2**: A payment whose `amount` is at or below 500 paise is marked as Test, and a client whose `razorpay_key_id` begins `rzp_test` is marked as a Test account. Test rows remain visible and included in totals, carrying a visible Test badge.
 - **AC-3**: The dashboard exposes two separately named metrics: Conversion rate (paid payments divided by sessions) and Checkout completion (paid payments divided by all payment attempts). Neither is labelled simply "conversion".
-- **AC-4**: Every session and payment resolves to a canonical ad key using the first available of `h_ad_id`, `Ad_id`, `Ad ID`, then `utm_content`, and records whether the match came from an identifier or from a name.
+- **AC-4**: Every session and payment resolves canonical campaign, adset and ad keys: the stored `campaign_id` / `adset_id` / `ad_id` columns first, then extraction (`h_ad_id` and the `Ad_id` / `Ad ID` variants for the ad; `fbc_id`, else `utm_term` under the numeric guard, for the adset; `utm_id` or `campaign_id` for the campaign), then an ad name match scoped to the row's campaign, recording whether the ad match came from an identifier or from a name. Identifiers always win over names; an ambiguous name resolves nothing at ad level.
 - **AC-5**: Rows with no resolvable ad key are grouped into an explicit Unattributed bucket and never silently dropped, so displayed totals always reconcile to real totals.
 - **AC-6**: Every new table and view returns only the caller's own `client_id` rows unless the caller carries the `is_admin` claim.
 - **AC-7**: An admin can map one Trace client to one or more Meta ad accounts, and can disconnect a mapping without deleting historical data.
@@ -59,7 +60,7 @@ These three points bind the children together. Change one and all three specs ne
 - **AC-17**: ROAS and CPA are computed from Trace's paid payments only, never from any Meta reported conversion figure.
 - **AC-18**: The Ads views show a Spend with no tracked sessions row and an Unattributed revenue row, so spend and revenue columns each total to the real figure.
 - **AC-19**: A row whose join came from an ad name rather than an identifier is visibly marked as such.
-- **AC-20**: A row that resolves no ad key but carries a campaign key is counted in campaign level rollups, marked as attributed at campaign level only, and appears in the ad level Unattributed bucket.
+- **AC-20**: A row that resolves no ad key but carries an adset or campaign key is counted in that coarser rollup, marked as attributed at that level only, and appears in the finer levels' Unattributed buckets.
 
 ## Decision
 
@@ -167,7 +168,9 @@ Ordered as end to end slices (Tracer Bullet), since no build approach is recorde
 
 **Slice A, trustworthy numbers with no Meta dependency** (child 01):
 
-1. Create the read layer views: normalized UTM, Test marking, canonical ad key with `match_type`, and the campaign level fallback tier, satisfies **AC-1**, **AC-2**, **AC-4**, **AC-20**.
+Done 2026-08-09 ahead of the views: the `ads` table (pulled forward from child 02, with row level security), Love School's 67 ad seed from Sharan's Ads Manager export, the additive `campaign_id` / `adset_id` / `ad_id` columns on `sessions` and `payments`, and the one time Love School backfill (verified: hierarchy consistent, idempotent, originals untouched byte for byte).
+
+1. Create the read layer views: normalized UTM, Test marking, the three canonical keys with `match_type`, and the adset and campaign fallback tiers, satisfies **AC-1**, **AC-2**, **AC-4**, **AC-20**.
 2. Expose Conversion rate and Checkout completion as separately named metrics, satisfies **AC-3**.
 3. Add the Unattributed bucket to every breakdown, satisfies **AC-5**.
 4. Verify the views under a client JWT and an admin JWT, satisfies **AC-6**.
@@ -208,7 +211,7 @@ Ordered as end to end slices (Tracer Bullet), since no build approach is recorde
 
 **Negative and tradeoffs**:
 
-- Love School has no ad identifiers at all on the session side, so their ad level reporting rests entirely on ad names. A rename in Meta forks one ad into two rows and there is no way to detect it automatically. Their campaign level numbers are sound; their ad level numbers are approximate, and the interface must say so.
+- Love School's ad level history is now largely solid, not approximate: the 2026-08-09 normalisation resolved 7,730 of 8,209 sessions to an exact ad (34 percent carried real ad identifiers, and the campaign scoped name rule recovered the rest against Meta's own hierarchy export). The residual caveats: rows resolved by name are marked as such and a Meta rename still forks history, and roughly 160 paid sessions resolve only to adset or campaign level. The earlier claim here that Love School had no session side ad identifiers was wrong and is corrected by the profiling in child 01.
 - Writing a Meta client by hand means owning pagination, asynchronous job polling and rate limit handling, roughly a day of work that the official SDK would have provided.
 - Cost side metrics only ever cover Meta. Any spend on another channel stays invisible, so agency wide ROAS is really Meta ROAS and must be labelled that way.
 - Attribution stays last touch and single session. A customer who clicks an ad and returns later through a direct visit credits the later session, so ad level revenue is systematically understated for considered purchases.
@@ -226,7 +229,9 @@ Ordered as end to end slices (Tracer Bullet), since no build approach is recorde
 - [ ] Confirm before building Slice B whether Partner shared ad accounts count as "accounts you own" for Standard access. If Meta requires Advanced access, App Review becomes a launch blocking prerequisite with a multi week lead time, and the admin picker over your own accounts is the fallback.
 - [ ] Advanced access, if it ever becomes necessary, must be maintained with at least 500 Marketing API calls every 15 days at under 15% error rate. A four client nightly sync may not naturally reach that.
 - [ ] Fix the `utm_source=` prefix at the point of capture in the Trace repository. The view in child 01 repairs history, but bad rows keep arriving until the capture is fixed.
-- [ ] Set Meta dynamic URL parameters on Love School's ads (`h_ad_id={{ad.id}}`, ad set and campaign equivalents) in Ads Manager. This is a settings change, not code, and it is the only way their future sessions gain real ad identifiers. History before the change cannot be recovered.
+- [ ] Apply the standard URL template from [04-utm-template-standard.md](04-utm-template-standard.md) in Ads Manager for every client, and rename any Meta campaign, ad set or ad containing `&`. (Supersedes the earlier note about Love School's dynamic URL parameters. History was recovered after all: the 2026-08-09 backfill resolved it against Meta's own hierarchy export.)
+- [ ] Have Trace's capture write `campaign_id`, `adset_id` and `ad_id` directly on new sessions and payments (the template puts all three in the URL). Until then the columns stay null on new rows and the views bridge by extraction.
+- [ ] Mirror the three new columns and the `ads` table in the Trace repository's schema types when convenient.
 - [ ] Decide whether to import spend from channels other than Meta before labelling anything as overall ROAS.
 - [ ] No `docs/scope/` exists in this project, so these build tasks live here as the source of truth. Consider running `/scope` to enroll this work if you want lifecycle tracking.
 - [ ] No build approach is recorded. The plan above assumes end to end slices; record the project default in `AGENTS.md` if you want a different shape.

@@ -14,6 +14,8 @@ Source spec: [`docs/superpowers/specs/2026-08-09-meta-ads-attribution/01-metrics
 
 ## Spec corrections verified against the live database on 2026-08-09
 
+> **Partly superseded — read "Plan revision" below before acting on this section.** These corrections were measured before Sharan's Love School normalisation shipped. Points 2 to 6 still hold and still bind. Point 1 has been overtaken by events: the ad identifiers it found are now stored in dedicated columns, and coverage went from 34% to 94%. Tasks 1 and 2 were built against this section; Tasks 3 to 7 were rewritten against the revision.
+
 The spec's `rationale.md` profile contains one significant error and several gaps. These were re-measured directly and **this plan's values supersede the spec's**. Record them; do not "fix" the code back toward the spec text.
 
 1. **Love School DOES carry ad identifiers on sessions.** The spec says "Love School has ZERO ad IDs on sessions" and calls it "the single most consequential number in this profile". It is wrong. 2,827 of 8,199 Love School sessions (34%) carry a real numeric ad ID in `landing_url` under the key `Ad+ID` (a URL-encoded `Ad ID`), spanning 7 distinct ads. The original profile only looked for the `h_ad_id` / `ad_id` spellings. Consequence: Love School gets genuine identifier-based ad attribution on a third of its sessions, not name-matching only.
@@ -469,53 +471,431 @@ git commit -m "feat(db): add shared metric extraction helper functions"
 
 ---
 
-### Task 3: `v_sessions_attributed`
+## Plan revision — 2026-08-09, after the Love School normalisation
+
+Tasks 1 and 2 are complete and merged into the branch. Everything below was rewritten after Sharan shipped four migrations (`ads_dimension_table`, `seed_love_school_ads`, `meta_id_columns_on_sessions_payments`, `backfill_love_school_meta_ids`) and revised child spec 01 from two-tier to three-tier attribution. The original Tasks 3 to 6 are superseded.
+
+**What changed in the world, verified live before rewriting:**
+
+- `public.ads` exists, is RLS-protected correctly (read: `is_admin` OR own `client_id`; insert and update: `is_admin` only, with `WITH CHECK`), and holds Love School's full hierarchy — 67 ads, 19 ad sets, 9 campaigns, zero incomplete rows.
+- `sessions` and `payments` carry additive nullable text columns `campaign_id`, `adset_id`, `ad_id`. Love School was backfilled: 7,745 of 8,238 sessions (94%) and 668 of 716 payments now carry an exact ad id. Referential integrity confirmed — zero session `ad_id` values missing from `ads`, zero rows disagreeing with `ads` on adset or campaign.
+- **Occultyogis Vastu has zero stored ids and zero rows in `ads`**, but 2,018 of 2,401 sessions and 228 of 248 payments carry an extractable ad id in their raw parameters. The views must therefore resolve an ad key from extraction even when `ads` has no matching row, degrading only the names and the hierarchy. This is the single most important test case in the rewrite, and it is why every join to `ads` is a LEFT join.
+- Sharan's new URL template is already live on 1,043 sessions. **29 of them carry `campaign_id=` with no `utm_id=`, and the shipped `metric_campaign_id_from_url` misses every one** because it reads only `utm_id`. That count grows as the template rolls out.
+- `fbc_id` is present on 2,037 sessions and numeric `utm_term` on 4,695; where both appear they never disagree (0 of 1,973), so a single scan-and-filter ad set helper is safe.
+- Ad names are genuinely unsafe to match unscoped: 14 of Love School's 49 names are reused across ads, and one name is duplicated **inside a single campaign**. That last row must resolve to no ad at all rather than guess.
+
+**Additional Global Constraints introduced by this revision** (they bind every task below, on top of the original Global Constraints section):
+
+- **Attribution reads `coalesce(stored id, extracted id)`.** Stored columns win; extraction is the bridge for rows that arrived after the backfill and for clients never backfilled. Never read only one source.
+- **The three tiers are ad, then ad set, then campaign.** A row is attributed at the most specific tier that resolves. A row attributed at ad set level is Unattributed at ad level; both statements are true simultaneously and both must hold.
+- **Ad names resolve only when unique within the row's campaign**, scoped to the row's own client. A name still ambiguous after scoping resolves nothing at ad level — it keeps whatever ad set or campaign tier resolved and appears in the ad-level Unattributed bucket. Never break a tie arbitrarily.
+- **Ids always beat names.** A name match is only ever attempted when no id resolved.
+- **Every join to `ads` is a LEFT join** and must not multiply rows. A client with no seeded ads must still get ad keys from extraction.
+- `metric_normalize_ad_id` is the generic numeric Meta-id guard — it is correct to use it for ad set ids too. It is deliberately NOT used for campaign ids, because the test client legitimately uses the non-numeric campaign id `june-test-01`.
+
+---
+
+### Task 3: Extend the metric helpers for ad set and the widened campaign key
+
+Adds ad set extraction and fixes the campaign extraction gap that is already losing rows. Pure additive SQL, composing the existing normalizers — no regex is re-derived.
 
 **Files:**
-- Create: `supabase/migrations/20260809120100_v_sessions_attributed.sql`
-- Create: `tests/v-sessions-attributed.test.ts`
+- Create: `supabase/migrations/20260809140000_metric_helpers_adset_and_campaign.sql`
+- Modify: `tests/metric-helpers.test.ts` (add new describe blocks; leave existing cases untouched)
 
 **Interfaces:**
-- Consumes: every `public.metric_*` function from Task 2.
-- Produces: view `public.v_sessions_attributed` — all `sessions` columns plus `utm_source_clean text`, `ad_key text`, `ad_key_type text` (`'ad_id' | 'ad_name' | 'none'`), `campaign_key text`, `day_ist date`. Task 6 and Slice D read these column names.
+- Consumes: `public.metric_normalize_ad_id(text)`, `public.metric_normalize_key(text)` from Task 2.
+- Produces (all `immutable`, `parallel safe`, granted execute to `anon` and `authenticated`, callable over RPC):
+  - `public.metric_campaign_id_key_pattern() -> text`
+  - `public.metric_adset_id_key_pattern() -> text`
+  - `public.metric_campaign_id_from_url(url text) -> text` (REPLACED — widened, signature and parameter name unchanged)
+  - `public.metric_campaign_id_from_params(params jsonb) -> text`
+  - `public.metric_adset_id_from_url(url text) -> text`
+  - `public.metric_adset_id_from_params(params jsonb) -> text`
+- Tasks 4 and 5 compose these. They must never re-implement an extraction rule inline.
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809120100_v_sessions_attributed.sql`:
+`supabase/migrations/20260809140000_metric_helpers_adset_and_campaign.sql`:
 
 ```sql
--- Normalized read layer over sessions. Adds the canonical ad key, the campaign
--- key, the repaired utm_source and the Asia/Kolkata day. Stores nothing and
--- changes no row — the repair runs on every read, which is what lets it correct
--- all history at once with no backfill.
+-- Ad set extraction, plus the campaign key widened to the new URL template.
 --
--- security_invoker = true is load-bearing: without it the view would run as its
--- owner and silently bypass every RLS policy on sessions, which is a tenant
--- data leak.
+-- WHY THE CAMPAIGN WIDENING IS URGENT: the original helper read only utm_id.
+-- Sharan's standard template emits campaign_id={{campaign.id}}, and 29 live
+-- sessions already carry campaign_id with no utm_id. Every one of them resolves
+-- no campaign today, and that count grows with every ad that adopts the template.
 --
--- Ad key source order: an identifier from the landing_url query string first,
--- then utm_content as a name match. ad_key_type records which, so the interface
--- can mark name matches as weak (a rename in Meta forks one ad into two).
+-- WHY utm_term NEEDS THE NUMERIC GUARD: utm_term provably carries the ad set ID
+-- in one template era and the ad set NAME in another. The numeric guard is the
+-- only thing separating them. Without it, ad set names would be joined against
+-- ad set ids and resolve nothing while looking attributed.
+--
+-- fbc_id is the AD SET id. It is NOT fbclid, which is Meta's click id. The
+-- anchored patterns keep them apart -- never use LIKE '%fbc_id%', which matches
+-- fbclid because `_` is a single-character wildcard in LIKE.
+--
+-- Both extractors use the same scan-then-filter shape as metric_ad_id_from_url:
+-- take the first value that passes the guard, not the first key that matches.
+
+-- Campaign id key variants. The new template emits `campaign_id`; older rows
+-- carry `utm_id`. Both mean the Meta campaign id.
+create or replace function public.metric_campaign_id_key_pattern()
+returns text language sql immutable parallel safe as $$
+  select '(?:utm_id|campaign_id)'
+$$;
+
+-- Ad set id key variants. fbc_id is what both the old and the new template
+-- emit; adset_id is accepted for symmetry; utm_term is the legacy era and is
+-- only trusted when it passes the numeric guard.
+create or replace function public.metric_adset_id_key_pattern()
+returns text language sql immutable parallel safe as $$
+  select '(?:fbc_id|adset_id|utm_term)'
+$$;
+
+-- Campaign id from a URL query string. Junk filter only, NO numeric guard:
+-- campaign ids are numeric for the paying clients, but the test client
+-- legitimately uses 'june-test-01'. Requiring digits would silently drop it.
+create or replace function public.metric_campaign_id_from_url(url text)
+returns text language sql immutable parallel safe as $$
+  select public.metric_normalize_key(m[1])
+  from regexp_matches(
+    url,
+    '[?&]' || public.metric_campaign_id_key_pattern() || '=([^&#]*)',
+    'gi'
+  ) as m
+  where public.metric_normalize_key(m[1]) is not null
+  limit 1
+$$;
+
+-- Campaign id from the jsonb params. Only the named keys are ever read: the
+-- utm_params key space is unbounded because campaign names leak in as keys,
+-- so nothing may enumerate keys generically.
+create or replace function public.metric_campaign_id_from_params(params jsonb)
+returns text language sql immutable parallel safe as $$
+  select public.metric_normalize_key(e.value)
+  from jsonb_each_text(
+    case when jsonb_typeof(params) = 'object' then params else '{}'::jsonb end
+  ) as e
+  where e.key ~* ('^' || public.metric_campaign_id_key_pattern() || '$')
+    and public.metric_normalize_key(e.value) is not null
+  limit 1
+$$;
+
+-- Ad set id from a URL query string. Numeric guard applies to every variant,
+-- which is what makes reading utm_term safe.
+create or replace function public.metric_adset_id_from_url(url text)
+returns text language sql immutable parallel safe as $$
+  select public.metric_normalize_ad_id(m[1])
+  from regexp_matches(
+    url,
+    '[?&]' || public.metric_adset_id_key_pattern() || '=([^&#]*)',
+    'gi'
+  ) as m
+  where public.metric_normalize_ad_id(m[1]) is not null
+  limit 1
+$$;
+
+-- Ad set id from the jsonb params.
+create or replace function public.metric_adset_id_from_params(params jsonb)
+returns text language sql immutable parallel safe as $$
+  select public.metric_normalize_ad_id(e.value)
+  from jsonb_each_text(
+    case when jsonb_typeof(params) = 'object' then params else '{}'::jsonb end
+  ) as e
+  where e.key ~* ('^' || public.metric_adset_id_key_pattern() || '$')
+    and public.metric_normalize_ad_id(e.value) is not null
+  limit 1
+$$;
+
+grant execute on function
+  public.metric_campaign_id_key_pattern(),
+  public.metric_adset_id_key_pattern(),
+  public.metric_campaign_id_from_url(text),
+  public.metric_campaign_id_from_params(jsonb),
+  public.metric_adset_id_from_url(text),
+  public.metric_adset_id_from_params(jsonb)
+to anon, authenticated;
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+Append these describe blocks to `tests/metric-helpers.test.ts`. Do not modify the existing cases — the widened campaign function must still satisfy every one of them.
+
+```ts
+describe("metric_campaign_id_from_url — widened to the new template", () => {
+  it("still reads a legacy utm_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=120987654321" })
+    ).toBe("120987654321");
+  });
+
+  it("reads campaign_id, which the new template emits and the old helper missed", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?campaign_id=120235128175530519" })
+    ).toBe("120235128175530519");
+  });
+
+  it("still preserves a non-numeric campaign id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?campaign_id=june-test-01" })
+    ).toBe("june-test-01");
+  });
+
+  it("skips a junk value to find a valid campaign id later in the string", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", {
+        url: "https://x.com/?utm_id=%7b%7bcampaign.id%7d%7d&campaign_id=120235128175530519",
+      })
+    ).toBe("120235128175530519");
+  });
+
+  it("does not match fbclid or fbc_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?fbclid=120999888777&fbc_id=120555444333" })
+    ).toBeNull();
+  });
+});
+
+describe("metric_campaign_id_from_params", () => {
+  it("reads utm_id", async () => {
+    expect(await rpc("metric_campaign_id_from_params", { params: { utm_id: "120987654321" } })).toBe(
+      "120987654321"
+    );
+  });
+
+  it("reads campaign_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { campaign_id: "120235128175530519" } })
+    ).toBe("120235128175530519");
+  });
+
+  it("rejects an unexpanded macro", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { utm_id: "{{campaign.id}}" } })
+    ).toBeNull();
+  });
+
+  it("ignores fbc_id, which is an ad set id, not a campaign id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { fbc_id: "120555444333" } })
+    ).toBeNull();
+  });
+});
+
+describe("metric_adset_id_from_url", () => {
+  it("reads fbc_id, the ad set id both templates emit", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbc_id=120237239322730519" })
+    ).toBe("120237239322730519");
+  });
+
+  it("reads a numeric utm_term, the legacy ad set id era", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?utm_term=120237239322730519" })
+    ).toBe("120237239322730519");
+  });
+
+  it("rejects a non-numeric utm_term, which is an ad set NAME, not an id", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?utm_term=OTG+-+15%2F1%2F2026" })
+    ).toBeNull();
+  });
+
+  it("prefers a valid id over a name when both eras appear together", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", {
+        url: "https://x.com/?utm_term=OTG+-+15%2F1%2F2026&fbc_id=120237239322730519",
+      })
+    ).toBe("120237239322730519");
+  });
+
+  it("does not match fbclid (the LIKE underscore-wildcard trap)", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbclid=120999888777" })
+    ).toBeNull();
+  });
+
+  it("rejects an unexpanded macro", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbc_id=%7b%7badset.id%7d%7d" })
+    ).toBeNull();
+  });
+});
+
+describe("metric_adset_id_from_params", () => {
+  it("reads fbc_id", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { fbc_id: "120237239322730519" } })
+    ).toBe("120237239322730519");
+  });
+
+  it("reads a numeric utm_term", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { utm_term: "120237239322730519" } })
+    ).toBe("120237239322730519");
+  });
+
+  it("rejects a non-numeric utm_term", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { utm_term: "OTG - 15/1/2026" } })
+    ).toBeNull();
+  });
+
+  it("never returns the ad id when only an ad id is present", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { h_ad_id: "120242114093820519" } })
+    ).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Run the tests to verify they fail**
+
+Run: `npm test -- tests/metric-helpers.test.ts`
+Expected: the four new describe blocks fail. The `campaign_id` cases fail because the shipped function reads only `utm_id`; the ad set cases fail with a PostgREST "Could not find the function" error.
+
+- [ ] **Step 4: Apply the migration**
+
+Load the MCP tools with `ToolSearch` query `select:mcp__claude_ai_Supabase__apply_migration`, then call `mcp__claude_ai_Supabase__apply_migration` with `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `metric_helpers_adset_and_campaign`, and the file contents as `query`.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `npm test -- tests/metric-helpers.test.ts`
+Expected: PASS, including every pre-existing case. If a pre-existing campaign test now fails, the widening broke backward compatibility — fix the function, never the old test.
+
+- [ ] **Step 6: Verify the real-data gap actually closed**
+
+Load `select:mcp__claude_ai_Supabase__execute_sql` and run, read-only:
+
+```sql
+select count(*) filter (where public.metric_campaign_id_from_url(landing_url) is null
+                          and landing_url ~* '[?&]campaign_id=') as still_missed,
+       count(*) filter (where public.metric_adset_id_from_url(landing_url) is not null) as adset_resolvable
+from sessions;
+```
+
+Expected: `still_missed` is 0 (it was 29 before this task), and `adset_resolvable` is in the low thousands. Record both numbers in your report.
+
+- [ ] **Step 7: Typecheck and commit**
+
+```bash
+npm run typecheck
+git add supabase/migrations/20260809140000_metric_helpers_adset_and_campaign.sql tests/metric-helpers.test.ts
+git commit -m "feat(db): add ad set extraction and widen campaign key to the new template"
+```
+
+---
+
+### Task 4: `v_sessions_attributed`
+
+The three-tier view over sessions. This is the most intricate task in the plan.
+
+**Files:**
+- Create: `supabase/migrations/20260809140100_v_sessions_attributed.sql`
+- Create: `tests/v-sessions-attributed.test.ts`
+
+**Interfaces:**
+- Consumes: every `public.metric_*` function from Tasks 2 and 3; the `public.ads` table.
+- Produces: view `public.v_sessions_attributed` — all `sessions` columns plus `utm_source_clean text`, `ad_key text`, `ad_key_type text` (`'ad_id' | 'ad_name' | 'none'`), `adset_key text`, `campaign_key text`, `attribution_tier text` (`'ad' | 'adset' | 'campaign' | 'none'`), `ad_name text`, `adset_name text`, `campaign_name text`, `day_ist date`. Task 7 and Slice D read these names.
+
+- [ ] **Step 1: Write the migration file**
+
+`supabase/migrations/20260809140100_v_sessions_attributed.sql`:
+
+```sql
+-- Three-tier attributed read layer over sessions.
+--
+-- security_invoker = true is load-bearing: without it the view runs as its
+-- owner and silently bypasses RLS on sessions and ads, which is a tenant leak.
+--
+-- KEY RESOLUTION, in strict order:
+--   1. The stored column (backfilled once for Love School, and eventually
+--      written by Trace's capture) wins.
+--   2. Otherwise extract from the raw landing_url via the shared metric_*
+--      functions. This is what carries every client that was never backfilled
+--      -- Occultyogis has zero stored ids but ~2,000 extractable ad ids -- and
+--      every row that arrived after the backfill.
+--   3. Only if no id resolved at all, fall back to a campaign-scoped ad NAME.
+--
+-- WHY THE NAME MATCH IS SCOPED: ad names are not unique. 14 of Love School's
+-- 49 names are reused across ads, and one name is duplicated inside a single
+-- campaign. name_in_campaign therefore keeps only names mapping to exactly one
+-- ad within one campaign for one client; anything ambiguous resolves nothing
+-- and lands in the ad-level Unattributed bucket rather than being guessed.
+-- The client_id in the grouping key matters: without it an admin, who can see
+-- every client's ads, could match one client's name against another's ad.
+--
+-- EVERY JOIN TO ads IS A LEFT JOIN. A client with no seeded ads (Occultyogis
+-- today) must still resolve ad keys from extraction; only the display names and
+-- the completed hierarchy degrade to null. Both joins are on unique or
+-- deduplicated keys, so neither can multiply rows.
 create or replace view public.v_sessions_attributed
 with (security_invoker = true) as
+with name_in_campaign as (
+  select client_id, meta_campaign_id, ad_name, min(meta_ad_id) as meta_ad_id
+  from public.ads
+  where ad_name is not null and meta_campaign_id is not null
+  group by client_id, meta_campaign_id, ad_name
+  having count(distinct meta_ad_id) = 1
+),
+resolved as (
+  select
+    s.*,
+    coalesce(s.ad_id, public.metric_ad_id_from_url(s.landing_url)) as ad_id_resolved,
+    coalesce(s.adset_id, public.metric_adset_id_from_url(s.landing_url)) as adset_id_resolved,
+    coalesce(s.campaign_id, public.metric_campaign_id_from_url(s.landing_url)) as campaign_id_resolved,
+    public.metric_normalize_key(s.utm_content) as ad_name_raw
+  from public.sessions s
+),
+keyed as (
+  select
+    r.*,
+    nic.meta_ad_id as ad_id_from_name
+  from resolved r
+  left join name_in_campaign nic
+    on r.ad_id_resolved is null
+   and nic.client_id = r.client_id
+   and nic.meta_campaign_id = r.campaign_id_resolved
+   and nic.ad_name = r.ad_name_raw
+)
 select
-  s.*,
-  public.metric_clean_utm_source(s.utm_source) as utm_source_clean,
-  coalesce(
-    public.metric_ad_id_from_url(s.landing_url),
-    public.metric_normalize_key(s.utm_content)
-  ) as ad_key,
+  k.id, k.client_id, k.product_id, k.fingerprint,
+  k.utm_source, k.utm_medium, k.utm_campaign, k.utm_content, k.utm_term,
+  k.fbclid, k.gclid, k.campaign_id, k.adset_id, k.ad_id,
+  k.referrer, k.landing_url,
+  k.device_ram_gb, k.device_cpu_cores, k.device_brand, k.device_model,
+  k.device_os, k.device_os_version,
+  k.network_type, k.network_speed_kbps, k.fcp_ms, k.tti_ms,
+  k.created_at,
+  public.metric_clean_utm_source(k.utm_source) as utm_source_clean,
+  coalesce(k.ad_id_resolved, k.ad_id_from_name) as ad_key,
   case
-    when public.metric_ad_id_from_url(s.landing_url) is not null then 'ad_id'
-    when public.metric_normalize_key(s.utm_content) is not null then 'ad_name'
+    when k.ad_id_resolved is not null then 'ad_id'
+    when k.ad_id_from_name is not null then 'ad_name'
     else 'none'
   end as ad_key_type,
-  public.metric_campaign_id_from_url(s.landing_url) as campaign_key,
-  (s.created_at at time zone 'Asia/Kolkata')::date as day_ist
-from public.sessions s;
+  coalesce(k.adset_id_resolved, a.meta_adset_id) as adset_key,
+  coalesce(k.campaign_id_resolved, a.meta_campaign_id) as campaign_key,
+  case
+    when coalesce(k.ad_id_resolved, k.ad_id_from_name) is not null then 'ad'
+    when coalesce(k.adset_id_resolved, a.meta_adset_id) is not null then 'adset'
+    when coalesce(k.campaign_id_resolved, a.meta_campaign_id) is not null then 'campaign'
+    else 'none'
+  end as attribution_tier,
+  a.ad_name,
+  a.adset_name,
+  a.campaign_name,
+  (k.created_at at time zone 'Asia/Kolkata')::date as day_ist
+from keyed k
+left join public.ads a
+  on a.meta_ad_id = coalesce(k.ad_id_resolved, k.ad_id_from_name)
+ and a.client_id = k.client_id;
 
 grant select on public.v_sessions_attributed to anon, authenticated;
 ```
+
+Note: the column list is spelled out rather than using `s.*` because the CTE adds working columns that must not leak into the view's output. If `sessions` has a column not in this list, add it — the view must expose every base column plus the derived ones. Verify with the query in Step 3.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -532,14 +912,35 @@ import {
 
 const VIEW = "v_sessions_attributed";
 
-describe(`${VIEW} — shape and rules`, () => {
+describe(`${VIEW} — shape`, () => {
   it("returns exactly one row per session, adding and dropping none", async () => {
     await expectStableEqualCounts(await adminClient(), VIEW, "sessions");
   });
 
+  it("exposes every base sessions column alongside the derived ones", async () => {
+    const admin = await adminClient();
+    const [viewRow, tableRow] = await Promise.all([
+      admin.from(VIEW).select("*").limit(1).single(),
+      admin.from("sessions").select("*").limit(1).single(),
+    ]);
+    if (viewRow.error) throw new Error(viewRow.error.message);
+    if (tableRow.error) throw new Error(tableRow.error.message);
+    for (const column of Object.keys(tableRow.data)) {
+      expect(Object.keys(viewRow.data)).toContain(column);
+    }
+  });
+
+  it("sets day_ist on every row", async () => {
+    const admin = await adminClient();
+    const { count, error } = await admin
+      .from(VIEW)
+      .select("*", { count: "exact", head: true })
+      .is("day_ist", null);
+    if (error) throw new Error(error.message);
+    expect(count).toBe(0);
+  });
+
   it("leaves no utm_source_clean carrying the leaked prefix", async () => {
-    // Asserted in JS, not with .like(): the pattern would itself need the
-    // underscore escaped, which is the exact trap this rule exists to avoid.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
@@ -552,13 +953,12 @@ describe(`${VIEW} — shape and rules`, () => {
       expect(row.utm_source_clean.startsWith("utm_source=")).toBe(false);
     }
   });
+});
 
+describe(`${VIEW} — key resolution`, () => {
   it("classifies every row as ad_id, ad_name or none, with the key agreeing", async () => {
     const admin = await adminClient();
-    const { data, error } = await admin
-      .from(VIEW)
-      .select("ad_key, ad_key_type")
-      .limit(1000);
+    const { data, error } = await admin.from(VIEW).select("ad_key, ad_key_type").limit(3000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) {
@@ -574,42 +974,133 @@ describe(`${VIEW} — shape and rules`, () => {
       .from(VIEW)
       .select("ad_key")
       .eq("ad_key_type", "ad_id")
-      .limit(500);
+      .limit(1000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) expect(row.ad_key).toMatch(/^[0-9]{6,}$/);
   });
 
-  it("resolves real identifier-based ad keys for more than one client", async () => {
+  it("prefers the stored id over extraction — every stored ad_id survives into ad_key", async () => {
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
-      .select("client_id")
+      .select("ad_id, ad_key, ad_key_type")
+      .not("ad_id", "is", null)
+      .limit(2000);
+    if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
+    for (const row of data!) {
+      expect(row.ad_key).toBe(row.ad_id);
+      expect(row.ad_key_type).toBe("ad_id");
+    }
+  });
+
+  it("resolves ad keys by extraction for a client with no stored ids and no seeded ads", async () => {
+    // Occultyogis Vastu: zero stored ids, zero rows in `ads`, but ~2,000
+    // extractable ad ids. This is the regression that would break a design
+    // reading only stored columns or requiring an `ads` row to exist.
+    const admin = await adminClient();
+    const { data, error } = await admin
+      .from(VIEW)
+      .select("client_id, ad_key, ad_key_type, ad_name")
+      .is("ad_id", null)
       .eq("ad_key_type", "ad_id")
-      .limit(5000);
+      .limit(2000);
     if (error) throw new Error(error.message);
-    const clients = new Set(data!.map((r) => r.client_id));
-    expect(clients.size).toBeGreaterThanOrEqual(2);
+    expect(data!.length).toBeGreaterThan(0);
+    for (const row of data!) expect(row.ad_key).toMatch(/^[0-9]{6,}$/);
   });
 
-  it("never emits an unexpanded macro as an ad key", async () => {
+  it("never resolves an ad name that is ambiguous within its campaign", async () => {
     const admin = await adminClient();
-    const { count, error } = await admin
+    const { data: ads, error: adsError } = await admin
+      .from("ads")
+      .select("client_id, meta_campaign_id, ad_name, meta_ad_id");
+    if (adsError) throw new Error(adsError.message);
+
+    const counts = new Map<string, Set<string>>();
+    for (const ad of ads!) {
+      const key = `${ad.client_id}|${ad.meta_campaign_id}|${ad.ad_name}`;
+      if (!counts.has(key)) counts.set(key, new Set());
+      counts.get(key)!.add(ad.meta_ad_id);
+    }
+    const ambiguous = [...counts.entries()].filter(([, ids]) => ids.size > 1);
+    expect(ambiguous.length).toBeGreaterThan(0); // the fixture this test needs exists
+
+    const { data: named, error } = await admin
       .from(VIEW)
-      .select("*", { count: "exact", head: true })
-      .ilike("ad_key", "%{{%");
+      .select("client_id, campaign_key, utm_content, ad_key")
+      .eq("ad_key_type", "ad_name")
+      .limit(3000);
     if (error) throw new Error(error.message);
-    expect(count).toBe(0);
+    const ambiguousKeys = new Set(ambiguous.map(([key]) => key));
+    for (const row of named!) {
+      expect(ambiguousKeys.has(`${row.client_id}|${row.campaign_key}|${row.utm_content}`)).toBe(
+        false
+      );
+    }
   });
 
-  it("sets day_ist on every row", async () => {
+  it("only ever name-matches a row that resolved no id", async () => {
     const admin = await adminClient();
-    const { count, error } = await admin
+    const { data, error } = await admin
       .from(VIEW)
-      .select("*", { count: "exact", head: true })
-      .is("day_ist", null);
+      .select("ad_id, ad_key_type")
+      .eq("ad_key_type", "ad_name")
+      .limit(2000);
     if (error) throw new Error(error.message);
-    expect(count).toBe(0);
+    for (const row of data!) expect(row.ad_id).toBeNull();
+  });
+});
+
+describe(`${VIEW} — three-tier attribution`, () => {
+  it("assigns the most specific tier that resolved", async () => {
+    const admin = await adminClient();
+    const { data, error } = await admin
+      .from(VIEW)
+      .select("ad_key, adset_key, campaign_key, attribution_tier")
+      .limit(3000);
+    if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
+    for (const row of data!) {
+      const expected =
+        row.ad_key !== null
+          ? "ad"
+          : row.adset_key !== null
+            ? "adset"
+            : row.campaign_key !== null
+              ? "campaign"
+              : "none";
+      expect(row.attribution_tier).toBe(expected);
+    }
+  });
+
+  it("resolves all three tiers for at least some rows", async () => {
+    const admin = await adminClient();
+    for (const tier of ["ad", "adset", "campaign"]) {
+      const { count, error } = await admin
+        .from(VIEW)
+        .select("*", { count: "exact", head: true })
+        .eq("attribution_tier", tier);
+      if (error) throw new Error(error.message);
+      expect(count, `expected at least one row at tier ${tier}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("fills the hierarchy from ads whenever the ad resolved to a seeded ad", async () => {
+    const admin = await adminClient();
+    const { data, error } = await admin
+      .from(VIEW)
+      .select("ad_key, adset_key, campaign_key, ad_name, campaign_name")
+      .not("ad_name", "is", null)
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
+    for (const row of data!) {
+      expect(row.adset_key).not.toBeNull();
+      expect(row.campaign_key).not.toBeNull();
+      expect(row.campaign_name).not.toBeNull();
+    }
   });
 });
 
@@ -626,7 +1117,7 @@ describe(`${VIEW} — RLS (AC-6)`, () => {
 
   it("returns exactly one client_id to the client identity", async () => {
     const client = await clientClient();
-    const { data, error } = await client.from(VIEW).select("client_id").limit(2000);
+    const { data, error } = await client.from(VIEW).select("client_id").limit(3000);
     if (error) throw new Error(error.message);
     expect(new Set(data!.map((r) => r.client_id)).size).toBe(1);
   });
@@ -638,86 +1129,148 @@ describe(`${VIEW} — RLS (AC-6)`, () => {
 Run: `npm test -- tests/v-sessions-attributed.test.ts`
 Expected: FAIL — the relation does not exist.
 
+Before applying, confirm your column list is complete. Load `select:mcp__claude_ai_Supabase__execute_sql` and run:
+
+```sql
+select column_name from information_schema.columns
+where table_schema='public' and table_name='sessions'
+order by ordinal_position;
+```
+
+Every column returned must appear in the view's select list.
+
 - [ ] **Step 4: Apply the migration**
 
-Supabase MCP `apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_sessions_attributed`.
+`mcp__claude_ai_Supabase__apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_sessions_attributed`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npm test -- tests/v-sessions-attributed.test.ts`
 Expected: PASS.
 
-The RLS pair is the important one. If the client identity's count equals admin's, `security_invoker` did not take effect — stop and report; do not relax the assertion.
+The RLS pair and the row-count equality are the ones that must never be relaxed. If the client count equals the admin count, `security_invoker` did not take effect. If the view has more rows than `sessions`, a join is multiplying rows — fix the join, do not add a `distinct`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Typecheck and commit**
 
 ```bash
-git add supabase/migrations/20260809120100_v_sessions_attributed.sql tests/v-sessions-attributed.test.ts
-git commit -m "feat(db): add v_sessions_attributed read-layer view"
+npm run typecheck
+git add supabase/migrations/20260809140100_v_sessions_attributed.sql tests/v-sessions-attributed.test.ts
+git commit -m "feat(db): add v_sessions_attributed with three-tier attribution"
 ```
 
 ---
 
-### Task 4: `v_payments_attributed`
+### Task 5: `v_payments_attributed`
+
+The same three-tier resolution over payments, sourcing from `utm_params` instead of a URL, plus the test-row marking.
 
 **Files:**
-- Create: `supabase/migrations/20260809120200_v_payments_attributed.sql`
+- Create: `supabase/migrations/20260809140200_v_payments_attributed.sql`
 - Create: `tests/v-payments-attributed.test.ts`
 
 **Interfaces:**
-- Consumes: every `public.metric_*` function from Task 2.
-- Produces: view `public.v_payments_attributed` — all `payments` columns plus `utm_source_clean text`, `ad_key text`, `ad_key_type text`, `campaign_key text`, `is_paid boolean`, `is_test_payment boolean`, `is_test_client boolean`, `day_ist date`. Task 6 and Slice D read these column names.
+- Consumes: every `public.metric_*` function from Tasks 2 and 3; `public.ads`; `public.clients` (for one derived boolean only).
+- Produces: view `public.v_payments_attributed` — all `payments` columns plus `utm_source_clean text`, `ad_key text`, `ad_key_type text`, `adset_key text`, `campaign_key text`, `attribution_tier text`, `ad_name text`, `adset_name text`, `campaign_name text`, `is_paid boolean`, `is_test_payment boolean`, `is_test_client boolean`, `day_ist date`.
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809120200_v_payments_attributed.sql`:
+`supabase/migrations/20260809140200_v_payments_attributed.sql`:
 
 ```sql
--- Normalized read layer over payments.
+-- Three-tier attributed read layer over payments. Mirrors
+-- v_sessions_attributed exactly, except the raw source is the utm_params jsonb
+-- rather than a URL query string, and the test-row marking is added.
 --
--- The join to clients exists ONLY to derive the is_test_client boolean. It must
--- stay a projection of a single derived value: `select c.*` here would expose
+-- THE clients JOIN EXISTS ONLY to derive is_test_client. It must stay a
+-- projection of that single boolean: `select c.*` here would expose
 -- razorpay_key_secret_enc / razorpay_webhook_secret_enc / tagmango_*_enc, which
--- are AES-256-GCM ciphertext this dashboard must never read. It is a LEFT join
--- so a payment can never vanish because its client row is invisible.
+-- are AES-256-GCM ciphertext this dashboard must never read. LEFT join, so a
+-- payment can never vanish because its client row is invisible.
 --
--- is_paid is `status = 'paid' OR paid_at IS NOT NULL` because a handful of rows
--- are paid with a null paid_at. day_ist prefers paid_at so revenue buckets on
--- the day the money arrived.
+-- starts_with() rather than LIKE 'rzp\_test%', so the underscore cannot be
+-- misread as a single-character wildcard.
+--
+-- is_paid is `status = 'paid' OR paid_at IS NOT NULL` because a few rows are
+-- paid with a null paid_at. day_ist prefers paid_at so revenue buckets on the
+-- day the money actually arrived.
 --
 -- is_test_payment is a PAYMENT-level rule, not a product-level one: test
--- products get repriced to their real value after roughly five transactions,
--- so a product flag would retroactively misclassify that product's history.
+-- products get repriced to their real value after roughly five transactions, so
+-- a product flag would retroactively misclassify that product's whole history.
 -- payments.amount is sourced server-side at payment time, so those rows keep
--- the Rs 1 value permanently. Test rows stay visible and stay in totals —
--- they are badged, never filtered.
---
--- starts_with() rather than LIKE 'rzp\_test%' so the underscore cannot be
--- misread as a single-character wildcard.
+-- the Rs 1 value permanently. Test rows stay visible and stay in totals -- they
+-- are badged, never filtered.
 create or replace view public.v_payments_attributed
 with (security_invoker = true) as
+with name_in_campaign as (
+  select client_id, meta_campaign_id, ad_name, min(meta_ad_id) as meta_ad_id
+  from public.ads
+  where ad_name is not null and meta_campaign_id is not null
+  group by client_id, meta_campaign_id, ad_name
+  having count(distinct meta_ad_id) = 1
+),
+resolved as (
+  select
+    p.*,
+    coalesce(p.ad_id, public.metric_ad_id_from_params(p.utm_params)) as ad_id_resolved,
+    coalesce(p.adset_id, public.metric_adset_id_from_params(p.utm_params)) as adset_id_resolved,
+    coalesce(p.campaign_id, public.metric_campaign_id_from_params(p.utm_params)) as campaign_id_resolved,
+    public.metric_normalize_key(p.utm_params ->> 'utm_content') as ad_name_raw
+  from public.payments p
+),
+keyed as (
+  select
+    r.*,
+    nic.meta_ad_id as ad_id_from_name
+  from resolved r
+  left join name_in_campaign nic
+    on r.ad_id_resolved is null
+   and nic.client_id = r.client_id
+   and nic.meta_campaign_id = r.campaign_id_resolved
+   and nic.ad_name = r.ad_name_raw
+)
 select
-  p.*,
-  public.metric_clean_utm_source(p.utm_source) as utm_source_clean,
-  coalesce(
-    public.metric_ad_id_from_params(p.utm_params),
-    public.metric_normalize_key(p.utm_params ->> 'utm_content')
-  ) as ad_key,
+  k.id, k.client_id, k.session_id, k.product_id,
+  k.order_id, k.payment_id, k.gateway, k.status,
+  k.amount, k.currency,
+  k.customer_name, k.customer_email, k.customer_phone,
+  k.utm_source, k.utm_medium, k.utm_campaign, k.fbclid, k.gclid,
+  k.utm_params, k.customer_data, k.raw_payload,
+  k.campaign_id, k.adset_id, k.ad_id,
+  k.visit_count, k.minutes_to_convert,
+  k.created_at, k.paid_at,
+  public.metric_clean_utm_source(k.utm_source) as utm_source_clean,
+  coalesce(k.ad_id_resolved, k.ad_id_from_name) as ad_key,
   case
-    when public.metric_ad_id_from_params(p.utm_params) is not null then 'ad_id'
-    when public.metric_normalize_key(p.utm_params ->> 'utm_content') is not null then 'ad_name'
+    when k.ad_id_resolved is not null then 'ad_id'
+    when k.ad_id_from_name is not null then 'ad_name'
     else 'none'
   end as ad_key_type,
-  public.metric_normalize_key(p.utm_params ->> 'utm_id') as campaign_key,
-  (p.status = 'paid' or p.paid_at is not null) as is_paid,
-  (p.amount <= 500) as is_test_payment,
+  coalesce(k.adset_id_resolved, a.meta_adset_id) as adset_key,
+  coalesce(k.campaign_id_resolved, a.meta_campaign_id) as campaign_key,
+  case
+    when coalesce(k.ad_id_resolved, k.ad_id_from_name) is not null then 'ad'
+    when coalesce(k.adset_id_resolved, a.meta_adset_id) is not null then 'adset'
+    when coalesce(k.campaign_id_resolved, a.meta_campaign_id) is not null then 'campaign'
+    else 'none'
+  end as attribution_tier,
+  a.ad_name,
+  a.adset_name,
+  a.campaign_name,
+  (k.status = 'paid' or k.paid_at is not null) as is_paid,
+  (k.amount <= 500) as is_test_payment,
   coalesce(starts_with(c.razorpay_key_id, 'rzp_test'), false) as is_test_client,
-  (coalesce(p.paid_at, p.created_at) at time zone 'Asia/Kolkata')::date as day_ist
-from public.payments p
-left join public.clients c on c.id = p.client_id;
+  (coalesce(k.paid_at, k.created_at) at time zone 'Asia/Kolkata')::date as day_ist
+from keyed k
+left join public.ads a
+  on a.meta_ad_id = coalesce(k.ad_id_resolved, k.ad_id_from_name)
+ and a.client_id = k.client_id
+left join public.clients c on c.id = k.client_id;
 
 grant select on public.v_payments_attributed to anon, authenticated;
 ```
+
+Verify the base column list against `information_schema` exactly as in Task 4 before applying.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -734,25 +1287,46 @@ import {
 
 const VIEW = "v_payments_attributed";
 
-describe(`${VIEW} — shape and rules`, () => {
+describe(`${VIEW} — shape and safety`, () => {
   it("returns exactly one row per payment, adding and dropping none", async () => {
     await expectStableEqualCounts(await adminClient(), VIEW, "payments");
   });
 
   it("never exposes an encrypted secret column", async () => {
     const admin = await adminClient();
-    const { data, error } = await admin.from(VIEW).select("*").limit(1);
+    const { data, error } = await admin.from(VIEW).select("*").limit(1).single();
     if (error) throw new Error(error.message);
-    const columns = Object.keys(data![0]);
-    for (const column of columns) expect(column).not.toMatch(/_enc$/);
+    for (const column of Object.keys(data)) expect(column).not.toMatch(/_enc$/);
   });
 
+  it("exposes every base payments column alongside the derived ones", async () => {
+    const admin = await adminClient();
+    const [viewRow, tableRow] = await Promise.all([
+      admin.from(VIEW).select("*").limit(1).single(),
+      admin.from("payments").select("*").limit(1).single(),
+    ]);
+    if (viewRow.error) throw new Error(viewRow.error.message);
+    if (tableRow.error) throw new Error(tableRow.error.message);
+    for (const column of Object.keys(tableRow.data)) {
+      expect(Object.keys(viewRow.data)).toContain(column);
+    }
+  });
+
+  it("sets day_ist on every row", async () => {
+    const admin = await adminClient();
+    const { count, error } = await admin
+      .from(VIEW)
+      .select("*", { count: "exact", head: true })
+      .is("day_ist", null);
+    if (error) throw new Error(error.message);
+    expect(count).toBe(0);
+  });
+});
+
+describe(`${VIEW} — payment rules (AC-2)`, () => {
   it("marks a payment at or below 500 paise as a test payment", async () => {
     const admin = await adminClient();
-    const { data, error } = await admin
-      .from(VIEW)
-      .select("amount, is_test_payment")
-      .limit(1000);
+    const { data, error } = await admin.from(VIEW).select("amount, is_test_payment").limit(1000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) expect(row.is_test_payment).toBe(row.amount <= 500);
@@ -770,10 +1344,7 @@ describe(`${VIEW} — shape and rules`, () => {
 
   it("treats a paid status with a null paid_at as paid", async () => {
     const admin = await adminClient();
-    const { data, error } = await admin
-      .from(VIEW)
-      .select("status, paid_at, is_paid")
-      .limit(1000);
+    const { data, error } = await admin.from(VIEW).select("status, paid_at, is_paid").limit(1000);
     if (error) throw new Error(error.message);
     for (const row of data!) {
       expect(row.is_paid).toBe(row.status === "paid" || row.paid_at !== null);
@@ -781,8 +1352,6 @@ describe(`${VIEW} — shape and rules`, () => {
   });
 
   it("leaves no utm_source_clean carrying the leaked prefix", async () => {
-    // Asserted in JS, not with .like(): the pattern would itself need the
-    // underscore escaped, which is the exact trap this rule exists to avoid.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
@@ -795,7 +1364,9 @@ describe(`${VIEW} — shape and rules`, () => {
       expect(row.utm_source_clean.startsWith("utm_source=")).toBe(false);
     }
   });
+});
 
+describe(`${VIEW} — three-tier attribution`, () => {
   it("classifies every row as ad_id, ad_name or none, with the key agreeing", async () => {
     const admin = await adminClient();
     const { data, error } = await admin.from(VIEW).select("ad_key, ad_key_type").limit(1000);
@@ -807,26 +1378,63 @@ describe(`${VIEW} — shape and rules`, () => {
     }
   });
 
-  it("emits only numeric identifiers when ad_key_type is ad_id", async () => {
+  it("prefers the stored id over extraction", async () => {
+    const admin = await adminClient();
+    const { data, error } = await admin
+      .from(VIEW)
+      .select("ad_id, ad_key, ad_key_type")
+      .not("ad_id", "is", null)
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
+    for (const row of data!) {
+      expect(row.ad_key).toBe(row.ad_id);
+      expect(row.ad_key_type).toBe("ad_id");
+    }
+  });
+
+  it("resolves ad keys by extraction for a client with no stored ids", async () => {
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
       .select("ad_key")
+      .is("ad_id", null)
       .eq("ad_key_type", "ad_id")
-      .limit(500);
+      .limit(1000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) expect(row.ad_key).toMatch(/^[0-9]{6,}$/);
   });
 
-  it("sets day_ist on every row", async () => {
+  it("assigns the most specific tier that resolved", async () => {
     const admin = await adminClient();
-    const { count, error } = await admin
+    const { data, error } = await admin
       .from(VIEW)
-      .select("*", { count: "exact", head: true })
-      .is("day_ist", null);
+      .select("ad_key, adset_key, campaign_key, attribution_tier")
+      .limit(1000);
     if (error) throw new Error(error.message);
-    expect(count).toBe(0);
+    for (const row of data!) {
+      const expected =
+        row.ad_key !== null
+          ? "ad"
+          : row.adset_key !== null
+            ? "adset"
+            : row.campaign_key !== null
+              ? "campaign"
+              : "none";
+      expect(row.attribution_tier).toBe(expected);
+    }
+  });
+
+  it("leaves payments with no session unattributed at every tier", async () => {
+    // 16 payments have no session_id and are permanently unattributable.
+    const admin = await adminClient();
+    const { data, error } = await admin
+      .from(VIEW)
+      .select("session_id, attribution_tier")
+      .is("session_id", null);
+    if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
   });
 });
 
@@ -847,6 +1455,13 @@ describe(`${VIEW} — RLS (AC-6)`, () => {
     if (error) throw new Error(error.message);
     expect(new Set(data!.map((r) => r.client_id)).size).toBe(1);
   });
+
+  it("never leaks another client's is_test_client signal", async () => {
+    const client = await clientClient();
+    const { data, error } = await client.from(VIEW).select("is_test_client").limit(500);
+    if (error) throw new Error(error.message);
+    expect(new Set(data!.map((r) => r.is_test_client)).size).toBe(1);
+  });
 });
 ```
 
@@ -857,26 +1472,29 @@ Expected: FAIL — the relation does not exist.
 
 - [ ] **Step 4: Apply the migration**
 
-Supabase MCP `apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_payments_attributed`.
+`mcp__claude_ai_Supabase__apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_payments_attributed`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npm test -- tests/v-payments-attributed.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Typecheck and commit**
 
 ```bash
-git add supabase/migrations/20260809120200_v_payments_attributed.sql tests/v-payments-attributed.test.ts
-git commit -m "feat(db): add v_payments_attributed read-layer view"
+npm run typecheck
+git add supabase/migrations/20260809140200_v_payments_attributed.sql tests/v-payments-attributed.test.ts
+git commit -m "feat(db): add v_payments_attributed with three-tier attribution"
 ```
 
 ---
 
-### Task 5: `v_funnel_by_session`
+### Task 6: `v_funnel_by_session`
+
+Unchanged in substance by the revision — the funnel does not touch attribution. Renumbered only.
 
 **Files:**
-- Create: `supabase/migrations/20260809120300_v_funnel_by_session.sql`
+- Create: `supabase/migrations/20260809140300_v_funnel_by_session.sql`
 - Create: `tests/v-funnel-by-session.test.ts`
 
 **Interfaces:**
@@ -884,7 +1502,7 @@ git commit -m "feat(db): add v_payments_attributed read-layer view"
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809120300_v_funnel_by_session.sql`:
+`supabase/migrations/20260809140300_v_funnel_by_session.sql`:
 
 ```sql
 -- One row per session with a boolean per funnel stage, computed as "reached
@@ -1017,25 +1635,26 @@ Expected: FAIL — the relation does not exist.
 
 - [ ] **Step 4: Apply the migration**
 
-Supabase MCP `apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_funnel_by_session`.
+`mcp__claude_ai_Supabase__apply_migration`, `project_id` `ggfkbcdegkpqrjmqjfyw`, `name` `v_funnel_by_session`.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npm test -- tests/v-funnel-by-session.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Typecheck and commit**
 
 ```bash
-git add supabase/migrations/20260809120300_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
+npm run typecheck
+git add supabase/migrations/20260809140300_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
 git commit -m "feat(db): add v_funnel_by_session with reached-or-beyond semantics"
 ```
 
 ---
 
-### Task 6: Named metrics and the Unattributed bucket
+### Task 7: Named metrics and the Unattributed bucket across three tiers
 
-Pure TypeScript. No database access — these are unit-tested in isolation, and they are the only place the two metric names and the Unattributed label are defined.
+Pure TypeScript, unit-tested in isolation with no database access. The only place the two metric names and the Unattributed label are defined.
 
 **Files:**
 - Create: `src/lib/metrics/definitions.ts`
@@ -1049,8 +1668,10 @@ Pure TypeScript. No database access — these are unit-tested in isolation, and 
   - `conversionRate(paidPayments: number, sessions: number): number | null`
   - `checkoutCompletion(paidPayments: number, paymentAttempts: number): number | null`
   - `UNATTRIBUTED_LABEL: string`
-  - `groupWithUnattributed<T>(rows: T[], keyOf: (row: T) => string | null | undefined, valueOf: (row: T) => number): AttributedGroup[]`
+  - `type AttributionTier = "ad" | "adset" | "campaign"`
   - `type AttributedGroup = { key: string | null; label: string; value: number; isUnattributed: boolean }`
+  - `groupWithUnattributed<T>(rows: T[], keyOf: (row: T) => string | null | undefined, valueOf: (row: T) => number): AttributedGroup[]`
+  - `tierKeyOf<T extends TierKeys>(tier: AttributionTier): (row: T) => string | null`
 - Slice D consumes all of these.
 
 - [ ] **Step 1: Write the failing metric-definition test**
@@ -1079,7 +1700,7 @@ describe("metric labels (AC-3)", () => {
 
 describe("conversionRate — paid payments over sessions", () => {
   it("computes the ratio", () => {
-    expect(conversionRate(465, 8180)).toBeCloseTo(0.05684, 5);
+    expect(conversionRate(467, 8238)).toBeCloseTo(0.0567, 4);
   });
 
   it("returns null rather than Infinity or NaN when there are no sessions", () => {
@@ -1094,11 +1715,11 @@ describe("conversionRate — paid payments over sessions", () => {
 
 describe("checkoutCompletion — paid payments over all attempts", () => {
   it("computes the ratio", () => {
-    expect(checkoutCompletion(465, 712)).toBeCloseTo(0.65309, 5);
+    expect(checkoutCompletion(467, 716)).toBeCloseTo(0.6522, 4);
   });
 
   it("differs from conversionRate on the same paid count", () => {
-    expect(checkoutCompletion(465, 712)).not.toBe(conversionRate(465, 8180));
+    expect(checkoutCompletion(467, 716)).not.toBe(conversionRate(467, 8238));
   });
 
   it("returns null rather than Infinity or NaN when there are no attempts", () => {
@@ -1116,64 +1737,98 @@ import { describe, expect, it } from "vitest";
 import {
   UNATTRIBUTED_LABEL,
   groupWithUnattributed,
+  tierKeyOf,
 } from "@/lib/metrics/attribution";
 
-type Row = { adKey: string | null; revenue: number };
+type Row = {
+  ad_key: string | null;
+  adset_key: string | null;
+  campaign_key: string | null;
+  revenue: number;
+};
 
+const row = (
+  ad: string | null,
+  adset: string | null,
+  campaign: string | null,
+  revenue: number
+): Row => ({ ad_key: ad, adset_key: adset, campaign_key: campaign, revenue });
+
+// Two rows on one ad, one row resolving only an ad set, one only a campaign,
+// and one resolving nothing at all.
 const rows: Row[] = [
-  { adKey: "120242114093820519", revenue: 9900 },
-  { adKey: "120242114093820519", revenue: 9900 },
-  { adKey: "120246979966760", revenue: 4900 },
-  { adKey: null, revenue: 9900 },
-  { adKey: null, revenue: 100 },
+  row("120242114093820519", "120237239322730519", "120235128175530519", 9900),
+  row("120242114093820519", "120237239322730519", "120235128175530519", 9900),
+  row(null, "120237239322730519", "120235128175530519", 4900),
+  row(null, null, "120235128175530519", 9900),
+  row(null, null, null, 100),
 ];
 
-const byAdKey = (row: Row) => row.adKey;
-const byRevenue = (row: Row) => row.revenue;
+const byRevenue = (r: Row) => r.revenue;
+const total = rows.reduce((sum, r) => sum + r.revenue, 0);
 
 describe("groupWithUnattributed (AC-5, AC-20)", () => {
-  it("reconciles: grouped rows plus Unattributed equal the ungrouped total", () => {
-    const groups = groupWithUnattributed(rows, byAdKey, byRevenue);
-    const total = rows.reduce((sum, row) => sum + row.revenue, 0);
-    expect(groups.reduce((sum, group) => sum + group.value, 0)).toBe(total);
+  it("reconciles at every tier: grouped rows plus Unattributed equal the total", () => {
+    for (const tier of ["ad", "adset", "campaign"] as const) {
+      const groups = groupWithUnattributed(rows, tierKeyOf<Row>(tier), byRevenue);
+      expect(groups.reduce((sum, g) => sum + g.value, 0), `tier ${tier}`).toBe(total);
+    }
   });
 
-  it("emits exactly one explicit Unattributed row rather than dropping rows", () => {
-    const groups = groupWithUnattributed(rows, byAdKey, byRevenue);
-    const unattributed = groups.filter((group) => group.isUnattributed);
-    expect(unattributed).toHaveLength(1);
-    expect(unattributed[0].label).toBe(UNATTRIBUTED_LABEL);
-    expect(unattributed[0].value).toBe(10000);
-    expect(unattributed[0].key).toBeNull();
+  it("emits exactly one explicit Unattributed row at every tier", () => {
+    for (const tier of ["ad", "adset", "campaign"] as const) {
+      const groups = groupWithUnattributed(rows, tierKeyOf<Row>(tier), byRevenue);
+      const unattributed = groups.filter((g) => g.isUnattributed);
+      expect(unattributed, `tier ${tier}`).toHaveLength(1);
+      expect(unattributed[0].label).toBe(UNATTRIBUTED_LABEL);
+      expect(unattributed[0].key).toBeNull();
+    }
+  });
+
+  it("counts an ad-set-only row as attributed at ad set level and Unattributed at ad level", () => {
+    const adGroups = groupWithUnattributed(rows, tierKeyOf<Row>("ad"), byRevenue);
+    const adsetGroups = groupWithUnattributed(rows, tierKeyOf<Row>("adset"), byRevenue);
+
+    // 4900 (ad-set-only) + 9900 (campaign-only) + 100 (nothing) at ad level
+    expect(adGroups.find((g) => g.isUnattributed)?.value).toBe(14900);
+    // at ad set level the 4900 joins the real ad set group
+    expect(adsetGroups.find((g) => g.key === "120237239322730519")?.value).toBe(24700);
+    expect(adsetGroups.find((g) => g.isUnattributed)?.value).toBe(10000);
+  });
+
+  it("narrows the Unattributed bucket as the tier gets less specific", () => {
+    const values = (["ad", "adset", "campaign"] as const).map(
+      (tier) =>
+        groupWithUnattributed(rows, tierKeyOf<Row>(tier), byRevenue).find((g) => g.isUnattributed)!
+          .value
+    );
+    expect(values[0]).toBeGreaterThan(values[1]);
+    expect(values[1]).toBeGreaterThan(values[2]);
+    expect(values[2]).toBe(100);
   });
 
   it("sums rows sharing a key", () => {
-    const groups = groupWithUnattributed(rows, byAdKey, byRevenue);
-    const group = groups.find((g) => g.key === "120242114093820519");
-    expect(group?.value).toBe(19800);
+    const groups = groupWithUnattributed(rows, tierKeyOf<Row>("ad"), byRevenue);
+    expect(groups.find((g) => g.key === "120242114093820519")?.value).toBe(19800);
   });
 
   it("still emits an Unattributed row when nothing is unattributed, so totals line up", () => {
-    const allAttributed: Row[] = [{ adKey: "120111222333", revenue: 100 }];
-    const groups = groupWithUnattributed(allAttributed, byAdKey, byRevenue);
+    const allAttributed = [row("120111222333", "120444555666", "120777888999", 100)];
+    const groups = groupWithUnattributed(allAttributed, tierKeyOf<Row>("ad"), byRevenue);
     expect(groups.filter((g) => g.isUnattributed)).toHaveLength(1);
     expect(groups.find((g) => g.isUnattributed)?.value).toBe(0);
   });
 
   it("treats empty and whitespace-only keys as unattributed", () => {
-    const messy: Row[] = [
-      { adKey: "", revenue: 10 },
-      { adKey: "   ", revenue: 20 },
-      { adKey: null, revenue: 30 },
-    ];
-    const groups = groupWithUnattributed(messy, byAdKey, byRevenue);
+    const messy = [row("", null, null, 10), row("   ", null, null, 20), row(null, null, null, 30)];
+    const groups = groupWithUnattributed(messy, tierKeyOf<Row>("ad"), byRevenue);
     expect(groups).toHaveLength(1);
     expect(groups[0].isUnattributed).toBe(true);
     expect(groups[0].value).toBe(60);
   });
 
   it("sorts attributed groups by descending value, keeping Unattributed last", () => {
-    const groups = groupWithUnattributed(rows, byAdKey, byRevenue);
+    const groups = groupWithUnattributed(rows, tierKeyOf<Row>("campaign"), byRevenue);
     expect(groups[groups.length - 1].isUnattributed).toBe(true);
     const attributed = groups.filter((g) => !g.isUnattributed);
     for (let i = 1; i < attributed.length; i++) {
@@ -1182,7 +1837,7 @@ describe("groupWithUnattributed (AC-5, AC-20)", () => {
   });
 
   it("returns only the zero Unattributed row for empty input", () => {
-    const groups = groupWithUnattributed([] as Row[], byAdKey, byRevenue);
+    const groups = groupWithUnattributed([] as Row[], tierKeyOf<Row>("ad"), byRevenue);
     expect(groups).toHaveLength(1);
     expect(groups[0].value).toBe(0);
   });
@@ -1235,15 +1890,27 @@ export function checkoutCompletion(
 
 ```ts
 /**
- * Grouping helper that guarantees a breakdown reconciles to its real total.
+ * Grouping helpers that guarantee a breakdown reconciles to its real total.
  *
- * Rows resolving no key are collected into one explicit Unattributed group
- * rather than filtered out, and that group is emitted even when it is empty,
- * so every breakdown satisfies: grouped rows + Unattributed = ungrouped total.
- * A row attributed at campaign level but not at ad level lands here in an ad
- * level rollup and in a real group in a campaign level rollup; both are true.
+ * Rows resolving no key at the requested tier are collected into one explicit
+ * Unattributed group rather than filtered out, and that group is emitted even
+ * when empty, so every breakdown satisfies:
+ *   grouped rows + Unattributed = ungrouped total.
+ *
+ * Attribution runs in three tiers. A row that resolved an ad set but no ad is
+ * attributed at ad set level and Unattributed at ad level — both are true at
+ * once, and both must hold. Selecting the tier through tierKeyOf keeps that
+ * property in one place instead of scattered across call sites.
  */
 export const UNATTRIBUTED_LABEL = "Unattributed";
+
+export type AttributionTier = "ad" | "adset" | "campaign";
+
+export type TierKeys = {
+  ad_key?: string | null;
+  adset_key?: string | null;
+  campaign_key?: string | null;
+};
 
 export type AttributedGroup = {
   key: string | null;
@@ -1251,6 +1918,20 @@ export type AttributedGroup = {
   value: number;
   isUnattributed: boolean;
 };
+
+const TIER_COLUMN: Record<AttributionTier, keyof TierKeys> = {
+  ad: "ad_key",
+  adset: "adset_key",
+  campaign: "campaign_key",
+};
+
+/** Key accessor for one attribution tier, for passing to groupWithUnattributed. */
+export function tierKeyOf<T extends TierKeys>(
+  tier: AttributionTier
+): (row: T) => string | null {
+  const column = TIER_COLUMN[tier];
+  return (row) => row[column] ?? null;
+}
 
 export function groupWithUnattributed<T>(
   rows: T[],
@@ -1299,7 +1980,7 @@ Expected: every test passes, no type errors.
 
 ```bash
 git add src/lib/metrics tests/metrics-definitions.test.ts tests/metrics-attribution.test.ts
-git commit -m "feat: add named metrics and Unattributed grouping helper"
+git commit -m "feat: add named metrics and three-tier Unattributed grouping"
 ```
 
 ---
@@ -1308,16 +1989,18 @@ git commit -m "feat: add named metrics and Unattributed grouping helper"
 
 | AC | Requirement | Covered by |
 |---|---|---|
-| AC-1 | `utm_source=` prefix aggregates under the clean label | Task 2 (`metric_clean_utm_source`), Tasks 3 & 4 (`utm_source_clean`) |
-| AC-2 | Payments ≤ 500 paise and `rzp_test` clients marked, still visible | Task 4 (`is_test_payment`, `is_test_client`) |
-| AC-3 | Two separately named metrics, neither called "conversion" | Task 6 (`definitions.ts`) |
-| AC-4 | Canonical ad key with identifier-vs-name match type | Task 2 (extraction functions), Tasks 3 & 4 (`ad_key`, `ad_key_type`) |
-| AC-5 | Unattributed bucket, never silently dropped | Task 6 (`groupWithUnattributed`) |
-| AC-6 | Every view returns only the caller's rows unless admin | Tasks 3, 4, 5 (`security_invoker` + RLS test pairs) |
-| AC-20 | Campaign-tier rows counted at campaign level, Unattributed at ad level | Tasks 3 & 4 (`campaign_key`), Task 6 (grouping by either key) |
+| AC-1 | `utm_source=` prefix aggregates under the clean label | Task 2 (`metric_clean_utm_source`), Tasks 4 & 5 (`utm_source_clean`) |
+| AC-2 | Payments ≤ 500 paise and `rzp_test` clients marked, still visible | Task 5 (`is_test_payment`, `is_test_client`) |
+| AC-3 | Two separately named metrics, neither called "conversion" | Task 7 (`definitions.ts`) |
+| AC-4 | Canonical ad key with identifier-vs-name match type | Tasks 2 & 3 (extraction), Tasks 4 & 5 (`ad_key`, `ad_key_type`) |
+| AC-5 | Unattributed bucket, never silently dropped | Task 7 (`groupWithUnattributed`) |
+| AC-6 | Every view returns only the caller's rows unless admin | Tasks 4, 5, 6 (`security_invoker` + RLS test pairs) |
+| AC-20 | Rows resolving a coarser tier counted there, Unattributed at the finer tier | Tasks 4 & 5 (`adset_key`, `campaign_key`, `attribution_tier`), Task 7 (`tierKeyOf`) |
 
 ## Out of scope for this slice
 
-- Joining `ad_key` / `campaign_key` to a real `ads` table — that table arrives in Slice B (child 02). Until then the keys are resolved but unmatched, which is exactly the intended intermediate state.
-- Any UI. The Ads section is Slice D (child 03).
+- Seeding Occultyogis Vastu into `ads`. Blocked on an Ads Manager export from Sharan — `temp-folder/meta_ad_hierarchy_mapping.csv` holds Love School's 67 ads only. Until it lands, Occultyogis resolves ad keys by extraction but shows no ad, ad set or campaign names. The views handle this by design and Task 4 tests it explicitly.
+- Spend, ROAS and CPA. There is still no cost data in the schema; that is Slice B.
+- Any UI. The Ads section is Slice D.
 - Fixing the `utm_source=` capture bug at source, which lives in the Trace repo.
+- Backfilling `campaign_id` / `adset_id` / `ad_id` for clients other than Love School. The views bridge with extraction, so a backfill is an optimisation, not a correctness requirement.

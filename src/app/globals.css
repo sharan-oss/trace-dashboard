@@ -66,7 +66,7 @@
   --secondary: oklch(0.96 0.010 262.971);
   --secondary-foreground: oklch(0.229 0.050 262.971);
   --muted: oklch(0.96 0.010 262.971);
-  --muted-foreground: oklch(0.229 0.050 262.971 / 60%);
+  --muted-foreground: oklch(0.229 0.050 262.971 / 65%);
   --accent: oklch(0.94 0.014 262.971);
   --accent-foreground: oklch(0.229 0.050 262.971);
   --destructive: oklch(0.577 0.245 27.325);
@@ -84,6 +84,7 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
+  /* 0.5rem (not the shadcn default 0.625rem) so radius-lg (8px) matches the design spec's inner-element radius target */
   --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);

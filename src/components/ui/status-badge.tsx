@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { TriangleAlert, CircleCheckBig, CircleX } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -9,9 +9,9 @@ const STATUS_CONFIG: Record<
   Status,
   { icon: LucideIcon; bg: string; fg: string }
 > = {
-  success: { icon: CheckCircle2, bg: "bg-success", fg: "text-success-foreground" },
-  warning: { icon: AlertTriangle, bg: "bg-warning", fg: "text-warning-foreground" },
-  danger: { icon: XCircle, bg: "bg-danger", fg: "text-danger-foreground" },
+  success: { icon: CircleCheckBig, bg: "bg-success", fg: "text-success-foreground" },
+  warning: { icon: TriangleAlert, bg: "bg-warning", fg: "text-warning-foreground" },
+  danger: { icon: CircleX, bg: "bg-danger", fg: "text-danger-foreground" },
 };
 
 export function StatusBadge({

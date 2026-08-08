@@ -1,5 +1,5 @@
-import type { LucideIcon } from "lucide-react";
-import { TriangleAlert, CircleCheckBig, CircleX } from "lucide-react";
+import type { Icon as IconsaxIcon } from "iconsax-react";
+import { TickCircle, Warning2, CloseCircle } from "iconsax-react";
 
 import { cn } from "@/lib/utils";
 
@@ -7,11 +7,11 @@ type Status = "success" | "warning" | "danger";
 
 const STATUS_CONFIG: Record<
   Status,
-  { icon: LucideIcon; bg: string; fg: string }
+  { icon: IconsaxIcon; bg: string; fg: string }
 > = {
-  success: { icon: CircleCheckBig, bg: "bg-success", fg: "text-success-foreground" },
-  warning: { icon: TriangleAlert, bg: "bg-warning", fg: "text-warning-foreground" },
-  danger: { icon: CircleX, bg: "bg-danger", fg: "text-danger-foreground" },
+  success: { icon: TickCircle, bg: "bg-success", fg: "text-success-foreground" },
+  warning: { icon: Warning2, bg: "bg-warning", fg: "text-warning-foreground" },
+  danger: { icon: CloseCircle, bg: "bg-danger", fg: "text-danger-foreground" },
 };
 
 export function StatusBadge({
@@ -33,7 +33,7 @@ export function StatusBadge({
         className,
       )}
     >
-      <Icon className="size-3.5" aria-hidden="true" />
+      <Icon variant="Bulk" className="size-3.5" aria-hidden="true" />
       {label}
     </span>
   );

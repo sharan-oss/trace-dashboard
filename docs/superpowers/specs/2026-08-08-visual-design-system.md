@@ -52,7 +52,7 @@ token is a structural/decorative divider, not text, so the 4.5:1 text-contrast r
 doesn't apply to it; WCAG's non-text boundary guidance (1.4.11, ~3:1) is also not required
 for purely decorative dividers, so the low-contrast hairline is intentional, not a defect.
 
-### Semantic (status only — always paired with a Lucide icon + text label, never color alone)
+### Semantic (status only — always paired with an icon + text label, never color alone)
 
 | Role | Text | Background tint | Contrast (text vs. own tint) | Contrast (text vs. canvas) |
 |---|---|---|---|---|
@@ -145,6 +145,13 @@ this doc stays the accurate source of truth rather than only the pre-implementat
   requires those slots to exist. They follow the same "derive from ink, not generic gray"
   principle as `--border` rather than introducing a separate neutral-gray family. Values are
   in the Structural token table above.
+- **`StatusBadge` icons use `iconsax-react` (`variant="Bulk"`), not Lucide.** Compared live
+  against Lucide (outline), Phosphor (Fill/Duotone), and Heroicons (Solid) on a throwaway
+  preview page — all read as "safe/generic" against the "young, not corporate" brief. Iconsax's
+  Bulk style (chunky, two-tone fills) was the one with actual character at 14px badge size.
+  This is a deliberate, scoped exception to `CLAUDE.md`'s Lucide-React stack line (which exists
+  to match Trace's own `package.json`) — Lucide stays installed and remains the default for any
+  future general-purpose icon use; only the three semantic status icons use Iconsax.
 
 ## Open questions for Phase 1 implementation (not blocking this spec)
 

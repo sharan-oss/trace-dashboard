@@ -182,3 +182,129 @@ describe("metric_clean_utm_source", () => {
     expect(await rpc("metric_clean_utm_source", { raw: "" })).toBeNull();
   });
 });
+
+describe("metric_campaign_id_from_url — widened to the new template", () => {
+  it("still reads a legacy utm_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?utm_id=120987654321" })
+    ).toBe("120987654321");
+  });
+
+  it("reads campaign_id, which the new template emits and the old helper missed", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?campaign_id=120235128175530519" })
+    ).toBe("120235128175530519");
+  });
+
+  it("still preserves a non-numeric campaign id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?campaign_id=june-test-01" })
+    ).toBe("june-test-01");
+  });
+
+  it("skips a junk value to find a valid campaign id later in the string", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", {
+        url: "https://x.com/?utm_id=%7b%7bcampaign.id%7d%7d&campaign_id=120235128175530519",
+      })
+    ).toBe("120235128175530519");
+  });
+
+  it("does not match fbclid or fbc_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_url", { url: "https://x.com/?fbclid=120999888777&fbc_id=120555444333" })
+    ).toBeNull();
+  });
+});
+
+describe("metric_campaign_id_from_params", () => {
+  it("reads utm_id", async () => {
+    expect(await rpc("metric_campaign_id_from_params", { params: { utm_id: "120987654321" } })).toBe(
+      "120987654321"
+    );
+  });
+
+  it("reads campaign_id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { campaign_id: "120235128175530519" } })
+    ).toBe("120235128175530519");
+  });
+
+  it("rejects an unexpanded macro", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { utm_id: "{{campaign.id}}" } })
+    ).toBeNull();
+  });
+
+  it("ignores fbc_id, which is an ad set id, not a campaign id", async () => {
+    expect(
+      await rpc("metric_campaign_id_from_params", { params: { fbc_id: "120555444333" } })
+    ).toBeNull();
+  });
+});
+
+describe("metric_adset_id_from_url", () => {
+  it("reads fbc_id, the ad set id both templates emit", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbc_id=120237239322730519" })
+    ).toBe("120237239322730519");
+  });
+
+  it("reads a numeric utm_term, the legacy ad set id era", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?utm_term=120237239322730519" })
+    ).toBe("120237239322730519");
+  });
+
+  it("rejects a non-numeric utm_term, which is an ad set NAME, not an id", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?utm_term=OTG+-+15%2F1%2F2026" })
+    ).toBeNull();
+  });
+
+  it("prefers a valid id over a name when both eras appear together", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", {
+        url: "https://x.com/?utm_term=OTG+-+15%2F1%2F2026&fbc_id=120237239322730519",
+      })
+    ).toBe("120237239322730519");
+  });
+
+  it("does not match fbclid (the LIKE underscore-wildcard trap)", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbclid=120999888777" })
+    ).toBeNull();
+  });
+
+  it("rejects an unexpanded macro", async () => {
+    expect(
+      await rpc("metric_adset_id_from_url", { url: "https://x.com/?fbc_id=%7b%7badset.id%7d%7d" })
+    ).toBeNull();
+  });
+});
+
+describe("metric_adset_id_from_params", () => {
+  it("reads fbc_id", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { fbc_id: "120237239322730519" } })
+    ).toBe("120237239322730519");
+  });
+
+  it("reads a numeric utm_term", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { utm_term: "120237239322730519" } })
+    ).toBe("120237239322730519");
+  });
+
+  it("rejects a non-numeric utm_term", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { utm_term: "OTG - 15/1/2026" } })
+    ).toBeNull();
+  });
+
+  it("never returns the ad id when only an ad id is present", async () => {
+    expect(
+      await rpc("metric_adset_id_from_params", { params: { h_ad_id: "120242114093820519" } })
+    ).toBeNull();
+  });
+});

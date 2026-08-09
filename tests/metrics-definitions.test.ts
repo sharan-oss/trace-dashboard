@@ -30,6 +30,13 @@ describe("conversionRate — paid payments over sessions", () => {
   it("returns 0 when there are sessions but no paid payments", () => {
     expect(conversionRate(0, 100)).toBe(0);
   });
+
+  it("returns null rather than a negative ratio when the denominator is negative", () => {
+    // The `ratio()` guard is `denominator <= 0`; a session count can never
+    // legitimately be negative, but this confirms the guard covers the whole
+    // non-positive range, not just the exact-zero case above.
+    expect(conversionRate(5, -10)).toBeNull();
+  });
 });
 
 describe("checkoutCompletion — paid payments over all attempts", () => {
@@ -37,11 +44,25 @@ describe("checkoutCompletion — paid payments over all attempts", () => {
     expect(checkoutCompletion(467, 716)).toBeCloseTo(0.6522, 4);
   });
 
-  it("differs from conversionRate on the same paid count", () => {
-    expect(checkoutCompletion(467, 716)).not.toBe(conversionRate(467, 8238));
-  });
-
   it("returns null rather than Infinity or NaN when there are no attempts", () => {
     expect(checkoutCompletion(0, 0)).toBeNull();
+  });
+});
+
+describe("checkoutCompletion is its own metric, not conversionRate under another name (AC-3)", () => {
+  it("is a distinct function from conversionRate", () => {
+    // Both metrics are, mechanically, the same division — that is exactly
+    // why an *output* comparison can never prove they are separately
+    // implemented: for any shared (numerator, denominator) pair, a correct
+    // independent implementation and a straight alias
+    // (`export const checkoutCompletion = conversionRate`) return the exact
+    // same number, because a÷b is a÷b no matter which function computed it.
+    // A prior version of this test compared checkoutCompletion(467, 716)
+    // against conversionRate(467, 8238) — different arguments on each side —
+    // so it "passed" even under the alias, since different inputs produce
+    // different outputs regardless of which function ran. The only thing
+    // that actually distinguishes "two metrics" from "one metric with two
+    // names" is that they are not the same function reference.
+    expect(checkoutCompletion).not.toBe(conversionRate);
   });
 });

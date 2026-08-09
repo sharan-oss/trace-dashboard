@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type * as React from "react";
 import { ScrollGrow } from "./scroll-grow";
-import { TestimonialCard, TestimonialEditorial } from "./testimonial";
+import { TestimonialEditorial } from "./testimonial";
 
 export const metadata: Metadata = {
   title: "Trace — Optimize your ad account for L2 conversions",
@@ -108,23 +108,9 @@ export default function LandingPage() {
         </Rise>
       </section>
 
-      {/*
-       * Testimonial slot 1 — TWO STYLES RENDERED FOR COMPARISON.
-       * Sharan picks one; delete the other and the dev labels.
-       */}
-      <section className="relative mx-auto w-full max-w-5xl space-y-16 px-6 pb-24">
-        <div className="space-y-6">
-          <p className="text-center text-xs font-semibold tracking-widest text-(--lp-faint) uppercase">
-            Style A — editorial pull-quote
-          </p>
-          <TestimonialEditorial />
-        </div>
-        <div className="space-y-6">
-          <p className="text-center text-xs font-semibold tracking-widest text-(--lp-faint) uppercase">
-            Style B — quiet card
-          </p>
-          <TestimonialCard />
-        </div>
+      {/* Testimonial slot 1 — editorial pull-quote (Style A, locked 2026-08-10) */}
+      <section className="relative mx-auto w-full max-w-5xl px-6 pb-24">
+        <TestimonialEditorial />
       </section>
 
       {/* Dashboard image — grows 80% → 100% width on scroll. Placeholder

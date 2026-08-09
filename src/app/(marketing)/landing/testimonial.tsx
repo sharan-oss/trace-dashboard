@@ -40,24 +40,3 @@ export function TestimonialEditorial() {
     </figure>
   );
 }
-
-/** Style B — quiet card: white surface, left-aligned, more conventional. */
-export function TestimonialCard() {
-  return (
-    <figure className="mx-auto max-w-2xl rounded-2xl border border-(--lp-line) bg-white/80 p-8 backdrop-blur-sm sm:p-10">
-      <Stars />
-      <blockquote className="mt-5 text-lg leading-relaxed text-(--lp-body)">
-        &ldquo;{PLACEHOLDER.quote}&rdquo;
-      </blockquote>
-      <figcaption className="mt-6 flex items-center gap-3 border-t border-(--lp-line) pt-6">
-        <span className="size-10 rounded-full bg-amber-200" />
-        <span className="text-sm">
-          <span className="block font-semibold text-(--lp-ink)">
-            {PLACEHOLDER.name}
-          </span>
-          <span className="text-(--lp-muted)">{PLACEHOLDER.business}</span>
-        </span>
-      </figcaption>
-    </figure>
-  );
-}

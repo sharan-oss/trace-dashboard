@@ -10,11 +10,11 @@ export const metadata: Metadata = {
 /* Placeholder until Sharan supplies real client face photos (spec: hero
  * avatar strip). Tinted circles only — no fake faces, no fake initials. */
 const AVATAR_TINTS = [
-  "bg-indigo-200",
+  "bg-amber-200",
   "bg-slate-300",
-  "bg-indigo-100",
+  "bg-amber-100",
   "bg-stone-300",
-  "bg-indigo-300",
+  "bg-blue-200",
 ];
 
 function Rise({

@@ -1,74 +1,48 @@
 # Memory — Trace Dashboard
 
-Last updated: 2026-08-10 (L2 attribution live; RLS leak fixed; dashboard is next)
+Last updated: 2026-08-10 evening (Phase 1 Overview shipped + dark design system v2 shipped)
 
 ## What was built
 
-**Slice A — metrics foundation** — merged to `main` and pushed. 11 `public.metric_*` extraction functions, four `security_invoker` views (`v_ad_name_resolution`, `v_sessions_attributed`, `v_payments_attributed`, `v_funnel_by_session`), `src/lib/metrics/` (the two named metrics + `groupWithUnattributed`/`tierKeyOf`), and a Vitest harness (`tests/helpers/supabase.ts` → `adminClient()`, `clientClient()`, `countRows()`, `expectStableEqualCounts()`). All tests run against the live DB through real RLS-scoped JWTs.
+**Phase 1 Overview (commit `3fbfcaa`)** — IA settled and approved: one page per decision — Overview `/`, Ads `/ads`, Customers `/customers`, Funnel `/funnel` (last three are stub routes), left sidebar, **single-client view only** with a cookie-backed client switcher. Files: `src/components/{app-shell,sidebar-nav,client-switcher,date-range-picker}.tsx`, `src/components/overview/{kpi-tile,revenue-chart-card,top-ads-table}.tsx`, `src/lib/{format,range,client-selection}.ts`, `src/lib/queries/overview.ts`, `src/app/actions.ts` (cookie server action), rewritten `src/app/page.tsx` (Phase 0 proof page gone; its RLS proof lives in tests). Migration `supabase/migrations/20260810100000_overview_aggregate_rpcs.sql`: three `security invoker` RPCs — `overview_kpis`, `overview_revenue_daily`, `overview_top_ads` — IST day windows (`p_days` null = all time), L1 from `v_payments_attributed` (paid), L2 from `external_payments` (`status='captured'`, dated `coalesce(paid_at, created_at)`), grouped by `ad_key` **including the NULL bucket**, L1/L2 in separate CTEs joined after (fan-out guard). Tests: `tests/{format,client-selection,overview-rpcs}.test.ts` — 163 total green, including SDK-oracle reconciliation, range monotonicity, tenant scoping (other-tenant → zeros, anon → error), and the ad_key-not-ad_name grouping premise.
 
-**L2 ingestion — built by Sharan directly in Supabase**, no migrations in either repo:
-- `customers` — identity: `client_id`, `email_norm`, `phone_norm`, `name`, **`l1_payment_id`** (the acquisition link), `first_paid_at`. 652 rows, all with `l1_payment_id`.
-- `external_payments` — the L2 mirror: `client_id`, `customer_id`, `source`, `external_payment_id`, `external_order_id`, `status`, `amount` (paise int), normalised email/phone, `description`, `product_name`, `raw_payload`, `paid_at`. 12 rows.
-- `sync_runs` — Razorpay job log: `source`, `triggered_by`, `window_from/to`, `pulled/inserted/deduped/reconciled/linked`. 40 runs.
-- Views `customer_payments_unified` (UNION of paid Trace payments + captured external) and `customer_spend` (per-customer lifetime value).
-- `payments` gained a `customer_id` column.
-
-**This session (commit `f791cda`, merged to `main`, NOT yet pushed):** the security fix below, plus `customer_id` added to `v_payments_attributed`. 124 tests passing, typecheck clean.
+**Design system v2 (commit `555e45a`)** — full restyle adopting **Trace's own dark glass admin system 1:1**: slate-950/900 gradient canvas, white/5 glass cards + backdrop blur, white/10 hairlines, indigo-only accent, slate text ladder, zero shadows, dark-only. Done as a token remap in `globals.css` (names unchanged, values only). Sharan's design doc committed verbatim at `docs/design-system/trace-design-system.md` (canonical); dashboard extensions + contrast notes in `docs/superpowers/specs/2026-08-10-visual-design-system-v2-dark.md` (supersedes the 2026-08-08 light spec). Inter and iconsax-react **removed** (Geist-only sans; StatusBadge is now lucide icon + colored text, no pill). `--radius: 0.625rem`. IA/Overview design spec: `docs/superpowers/specs/2026-08-10-dashboard-ia-and-overview-design.md`.
 
 ## Decisions made
 
-- **L2 credit rule: the ad behind the customer's FIRST L1 purchase** gets credit for everything they buy later. Measures acquisition value, and credit never reshuffles.
-- **L2 classification**: Sharan tags which `product_name` values count as L2, per client, after seeing real data.
-- **L2 ingestion runs through Trace**, reusing `getClientWithCredentials(clientId)` in `/Users/sharanv/apps/Trace/src/modules/payment/catalog.service.ts` — the dashboard stays forbidden from decrypting `*_secret_enc`.
-- **Dashboard is next, ahead of Slice B.** Slice B's payoff task is blocked on Meta App Review for weeks; the dashboard needs nothing external.
-- Meta: **`ads_read` Advanced access via App Review is a hard prerequisite** — partner-shared accounts count as "other people's ad accounts". Per-client OAuth does not avoid it. One review unlocks both models. Nothing started.
+- **Single-client view only** — no "all clients" mode. Cookie `trace_client_id`, re-resolved every request against the caller's RLS-visible client list (stale/forged cookie can never widen access); default Love School by name. Date range is a URL param `?range=7d|30d|all` (default 30d).
+- **All aggregation in Postgres RPCs** (`security invoker`; `p_client_id` is defense-in-depth, RLS is the guarantee). Never page rows into JS to sum in app code (test oracles may).
+- **L2 dedupe guard in SQL**: exclude `external_payments` rows whose `external_order_id` matches a `payments.order_id` for the same client. Verified a no-op today; stays for backfill safety.
+- **Meta-derived metrics (Spend, CPA, chart Spends/CPA tabs) are locked "Connect Meta" placeholders** — dormant styling, never fake zeros.
+- **Chart hero is L2** (indigo-400 2px, the 1.6× story); L1 is the slate-400 baseline; the table's L2 column is indigo-300. Deliberate emphasis inversion — do NOT "fix" back. Only remaining color question: a >2-series categorical palette.
+- KPI value at `text-4xl` is a recorded dashboard extension of the design doc's `text-xl` "big number".
 
 ## Problems solved
 
-- **CRITICAL, now fixed: a live tenant-data and PII leak.** `customer_spend` and `customer_payments_unified` were created without `security_invoker`, so they bypassed RLS on `customers`, `external_payments` and `payments`, while granting select to `anon`. Measured as `anon` — the role anyone gets from the publishable key, which ships to the browser — **652 customer rows across 2 clients, including email, phone and lifetime spend**. Fixed in `supabase/migrations/20260810090000_l2_tables_rls_and_view_invoker.sql`: `security_invoker` on both views **plus** the read policies the three L2 tables never had. Both halves were required — RLS was enabled with *zero* policies (deny-all), which is why the leak was only reachable through the views. Regression tests in `tests/l2-rls.test.ts`; `anon` now returns 0 everywhere. **Never relax those assertions.**
-- **`v_payments_attributed` was missing `customer_id`** — the join key for ad → L1 → customer → L2. The Slice A base-column parity test caught it. Note `create or replace view` cannot insert a column mid-list, only append, so it sits last deliberately.
-- Five tests once passed against deliberately broken implementations (Slice A) — all caught by mutation-testing in review. For every new test, ask which broken implementation it catches. Asserting only that rows exist is the recurring failure mode here.
+- **Postgres cannot FULL JOIN on `IS NOT DISTINCT FROM`** ("only supported with merge-joinable conditions") — join on `coalesce(key, '__unattributed__')` sentinel equality instead (`overview_top_ads`).
+- **`next build` failed prerendering** because the root-layout AppShell hit Supabase before anything marked routes dynamic. Fix: `await cookies()` FIRST in AppShell. Related: `<main>` must NOT have `bg-background` — an opaque main paints over the body gradient and kills every backdrop-blur.
+- **recharts 3.8 works on React 19 as-is** — the planned `react-is` override was a 2.x-era need, not required.
+- **Playwright harness** (no chromium-cli on this Mac): `playwright-core` installed in the session scratchpad, launched against the cached browser at `~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`.
+- **Occultyogis' two ₹99 external rows**: `external_order_id` matches NO `payments.order_id` and they carry distinct product names ("Energy Vastu - BRE/GCFB") — likely genuine L2, not re-imports. The SQL guard covers any future provable duplicates.
+- The dark "N" circle overlapping the client switcher in dev screenshots is the **Next.js dev-tools badge**, not our UI.
 
 ## Current state
 
-`main` is **1 commit ahead of `origin/main`** (the security fix) — everything before it is pushed. Branch `slice-b-meta-ads-sync` holds only the Slice B plan.
+`main` pushed through `555e45a`; typecheck, 163 tests, and production build all green; browser-verified at 1440px/375px with zero console errors. All-time Love School through the UI: **L1 ₹46,442 (480 paid) · L2 ₹97,242 (10)** — reconciled exactly against direct SQL.
 
-**The L2 thesis is proven.** 12 external payments totalling ₹97,440; **11 trace back to a specific ad**, ₹87,716 across 5 ads. Love School's ten L2 sales average ₹9,724 each against a ₹99 front end. **L2 is already 1.6× all L1 revenue combined (₹61,007).** Per ad, entirely through the read layer:
-
-| Ad | Customers | L1 | L2 | Multiple |
-|---|---|---|---|---|
-| B1_LMF_AD 6 (…310519) | 161 | ₹15,939 | ₹48,621 | 3.05× |
-| B1_LMF_AD 6 (…850519) | 41 | ₹4,059 | ₹19,448 | 4.79× |
-| VS - LS_10 | 72 | ₹7,227 | ₹9,724 | 1.35× |
-| AM01-TOF-OPEN | 59 | ₹5,841 | ₹9,724 | 1.66× |
-
-The top two share an identical `ad_name` but are different ad IDs — exactly the collision the campaign-scoped name rule guards against.
-
-L1 side: 9,789 of 10,693 sessions resolve an ad; ₹61,007 across Love School (₹45,845), Occultyogis (₹15,155), Batra (₹7).
-
-**Known-bad, still open:**
-- **`product_name` is null on 10 of 12 external payments** — every Love School row, i.e. all ₹97,242 of the real L2 revenue. The "tag which products are L2" workflow has nothing to tag for the client that matters.
-- **Occultyogis' 2 external rows are ₹99 each**, identical to their L1 price — likely Trace-checkout payments the mirror re-imported, not upsells. Check `external_order_id` against `payments.order_id` before counting them as L2, or revenue double-counts.
-- **Only 12 external rows, 12 Jul–8 Aug** — a partial import. Caption any L2 figure as incomplete.
-- **None of the L2 schema is in version control** — `customers`, `external_payments`, `sync_runs`, `payments.customer_id` and the two views exist only in the live DB. Check whether the Trace repo has them; if not they're undocumented in both.
-- **`sync_runs` name collision**: Slice B's plan (`docs/superpowers/plans/2026-08-09-meta-ads-sync-implementation.md`, Task 1) creates a differently-shaped `sync_runs` for Meta. Rename it to `ad_sync_runs` before that task runs or the migration fails.
+Still-open data caveats (unchanged from before): `product_name` null on 10/12 external payments (all real Love School L2 revenue — classification blocked); only 12 external rows (partial import 12 Jul–8 Aug, captioned in UI); **the L2 schema (`customers`, `external_payments`, `sync_runs`, `payments.customer_id`, two views) is still in no repo's version control**; Slice B's Meta sync log must be named `ad_sync_runs` (`sync_runs` is taken — recorded in STATUS.md).
 
 ## Next session starts with
 
-Push `main` (1 commit), then **build the Phase 1 revenue overview** — the approved design is in `~/.claude-work/plans/goofy-foraging-stream.md`. One admin screen at `/` replacing the Phase 0 proof page, reading the Slice A views.
+**Build the Ads page (`/ads`)** — the campaign → ad set → ad expandable hierarchy table (ONE page, three zoom levels, per the IA spec). It inherits design system v2 for free. Will need new aggregate RPC(s) at adset/campaign tiers — same pattern as `overview_top_ads` but grouped by `adset_key`/`campaign_key` from the attributed views; reuse `groupWithUnattributed` + `tierKeyOf` from `src/lib/metrics/attribution.ts`. Spend/ROAS/CPA columns render as locked placeholders until Meta connects.
 
-Needs building: `src/lib/format.ts` (paise → ₹ in `en-IN`, percent, null-safe — nothing exists, `src/lib/utils.ts` has only `cn`); `src/lib/queries/revenue.ts` (aggregate in Postgres, never by paging rows into JS); shadcn `chart` via `npx shadcn add chart` (**needs a `react-is` override on React 19**); and a fix to `BentoTile`, whose `col-span-2` has no responsive variant so a 2x2 tile overflows the one-column mobile grid.
-
-Reuse: `BentoGrid`/`BentoTile`/`StatusBadge`/`Button`, `conversionRate`/`checkoutCompletion` from `src/lib/metrics/definitions.ts`, and the `getDevJwt`/`createClientWithJwt` pattern already in `src/app/page.tsx`. Design rules are settled and binding (`docs/superpowers/specs/2026-08-08-visual-design-system.md`): no shadows, hairline borders only, colour = semantic status only, Geist Sans for KPI numbers, Inter for body, **Geist Mono for tabular figures**. Keep charts single-series so the deferred categorical palette stays deferred.
-
-Headline tile should read **L1 ₹61,007 · L2 ₹97,440**, L2 captioned as a partial import.
+Quick first check: ask Sharan if the hero tint (`border-indigo-500/30` + `bg-indigo-500/6`) and L2 indigo intensity look right in his browser — both are one-line token/class tweaks.
 
 ## Open questions
 
-- Backfill the rest of the Razorpay history — currently only 12 external payments exist.
-- Fix `product_name` capture for Love School, or L2 classification cannot work for the client that matters.
-- Confirm whether Occultyogis' two ₹99 external rows are re-imported L1s.
-- Meta App Review: Business Verification, then `ads_read` Advanced (read-only, not `ads_management`), then the System User and per-client view-performance grants. Occultyogis first — it unlocks names for 2,342 sessions and makes the cross-tenant guard testable.
-- Seed Occultyogis into `ads` (needs an Ads Manager export) — they resolve 2,342 ad keys by extraction but show no names.
-- Should the `#`-fragment capture bug be fixed in Trace? It splits 5 of ~964 paired rows across two ads.
-- Categorical chart palette and dark mode both still deferred.
+- Backfill the rest of Razorpay history (12 external rows today) — runs through Trace, not this repo.
+- Fix `product_name` capture for Love School or L2 classification can't work for the client that matters.
+- Capture the L2 schema into a migration in whichever repo owns it.
+- Meta App Review chain unchanged: Business Verification → `ads_read` Advanced → System User → per-client grants (Occultyogis first — unlocks names for 2,342 sessions). Seed Occultyogis into `ads` from an Ads Manager export before then.
+- The `#`-fragment capture bug in Trace (5 of ~964 paired rows).
+- Chart categorical palette for >2 series (the only remaining color decision; dark mode is resolved — the app IS dark).

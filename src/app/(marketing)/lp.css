@@ -17,17 +17,25 @@
   --lp-faint: #94a3b8; /* slate-400 */
   --lp-line: #e2e8f0; /* slate-200 */
   --lp-dot: #cbd5e1; /* slate-300 */
-  --lp-accent: #4f46e5; /* indigo-600 — same action indigo as the app */
-  --lp-accent-hover: #6366f1; /* indigo-500 */
-  --lp-tint: #eef2ff; /* indigo-50 */
-  --lp-tint-line: #c7d2fe; /* indigo-200 */
+  /*
+   * Semantic accent system (2026-08-10): CTAs are ink navy; red marks the
+   * problem, green marks the solution, amber is the neutral highlight.
+   * Copy rhetoric = color rhetoric ("you're facing X" red, "we do Y" green).
+   */
+  --lp-cta: #0d1b2e; /* buttons — same as ink */
+  --lp-cta-hover: #1d3a5f; /* lifted navy */
+  --lp-negative: #dc2626; /* red-600 — problems, waste, junk leads */
+  --lp-positive: #059669; /* emerald-600 — solutions, money, L2 wins */
+  --lp-highlight: #d97706; /* amber-600 — neutral emphasis */
+  --lp-tint: #fef3c7; /* amber-100 wash */
+  --lp-tint-line: #fde68a; /* amber-200 */
   color-scheme: light;
   background: var(--lp-canvas);
   color: var(--lp-body);
 }
 
 .lp ::selection {
-  background: oklch(0.585 0.233 277.117 / 20%);
+  background: rgb(253 230 138 / 45%); /* amber-200 */
 }
 
 /* Display face for headlines/wordmark; body stays on Geist via --font-sans. */
@@ -47,17 +55,17 @@
   background:
     radial-gradient(
       50% 60% at 0% 100%,
-      rgb(199 210 254 / 50%),
+      rgb(253 230 138 / 40%),
       transparent 70%
     ),
     radial-gradient(
       45% 55% at 100% 10%,
-      rgb(224 231 255 / 60%),
+      rgb(191 219 254 / 45%),
       transparent 70%
     ),
     radial-gradient(
       40% 50% at 100% 100%,
-      rgb(199 210 254 / 35%),
+      rgb(254 215 170 / 30%),
       transparent 70%
     );
 }

@@ -63,8 +63,8 @@ export default function LandingPage() {
         <Rise delay={0}>
           <h1 className="lp-display text-4xl leading-[1.05] font-bold tracking-tight text-balance text-(--lp-ink) sm:text-6xl lg:text-7xl">
             Optimize your ad account for{" "}
-            <span className="text-(--lp-accent)">L2 conversions</span> — not
-            cheap leads.
+            <span className="text-(--lp-positive)">L2 conversions</span> — not{" "}
+            <span className="text-(--lp-negative)">cheap leads</span>.
           </h1>
         </Rise>
 
@@ -82,7 +82,7 @@ export default function LandingPage() {
           {/* TODO: point at the request-access flow once its destination is decided */}
           <a
             href="#request-access"
-            className="rounded-full bg-(--lp-accent) px-8 py-4 text-base font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-(--lp-accent-hover)"
+            className="rounded-full bg-(--lp-cta) px-8 py-4 text-base font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-(--lp-cta-hover)"
           >
             Request Access
           </a>

@@ -1,10 +1,11 @@
 import type * as React from "react";
+import { Check } from "lucide-react";
 
 /*
  * Section 5 — "What you'll see in week one" (copy locked in spec).
  * Asymmetric bento: block 2 (Winners ranked by L2 revenue) is the flagship.
- * Each card's dark tile is a designed skeleton placeholder until the Gemini
- * image round ([feature-img-1..4]).
+ * Tiles are final micro-infographics (decided 2026-08-10: no Gemini images
+ * for this section) — illustrative numbers, real enough to read at a glance.
  */
 
 function Tile({
@@ -26,20 +27,30 @@ function Tile({
   );
 }
 
-/* [feature-img-1] payment ↔ ad match */
+/* Payment ↔ ad match: every rupee lands on the ad that caused it. */
+const MATCHES = [
+  { amount: "₹4,999", ad: "Webinar – Hook A" },
+  { amount: "₹49,000", ad: "Reel – Story 02" },
+  { amount: "₹4,999", ad: "Static – Broad" },
+];
+
 function TileMatched() {
   return (
     <Tile>
-      <div className="absolute inset-0 flex flex-col justify-center gap-4 px-6">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="flex items-center gap-3">
-            <span className="h-6 w-16 rounded-md bg-white/10" />
+      <div className="absolute inset-0 flex flex-col justify-center gap-3.5 px-5">
+        {MATCHES.map(({ amount, ad }) => (
+          <div key={ad} className="flex items-center gap-2.5">
+            <span className="w-18 shrink-0 rounded-md bg-white/10 px-2 py-1.5 text-right font-mono text-[10px] text-slate-300">
+              {amount}
+            </span>
             <span className="h-px flex-1 bg-white/15" />
-            <span
-              className={`size-2 rounded-full ${i === 1 ? "bg-emerald-400/80" : "bg-white/25"}`}
-            />
+            <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-emerald-400/20">
+              <Check size={9} className="text-emerald-400" strokeWidth={3} />
+            </span>
             <span className="h-px flex-1 bg-white/15" />
-            <span className="h-6 w-20 rounded-md bg-white/10" />
+            <span className="shrink-0 rounded-md bg-white/10 px-2 py-1.5 text-[10px] text-slate-400">
+              {ad}
+            </span>
           </div>
         ))}
       </div>
@@ -47,20 +58,53 @@ function TileMatched() {
   );
 }
 
-/* [feature-img-2] ads ranked by L2 revenue — flagship */
+/*
+ * Flagship: ads ranked by L2 revenue. The whole pitch in one glance —
+ * the winner has the HIGHEST CPA, the cheapest-CPA ad made ₹0.
+ */
+const WINNERS = [
+  { name: "Webinar – Hook A", cpa: "CPA ₹96", l2: "₹3.2L", bar: "w-[72%]", win: true },
+  { name: "Reel – Story 02", cpa: "CPA ₹71", l2: "₹1.1L", bar: "w-[38%]", win: false },
+  { name: "Static – Broad", cpa: "CPA ₹52", l2: "₹40k", bar: "w-[16%]", win: false },
+  { name: "Reel – Discount", cpa: "CPA ₹34", l2: "₹0", bar: "w-[3%]", win: false },
+];
+
 function TileWinners() {
-  const widths = ["w-[85%]", "w-[62%]", "w-[38%]", "w-[22%]"];
   return (
     <Tile tall>
-      <div className="absolute inset-0 flex flex-col justify-center gap-4 px-8">
-        {widths.map((w, i) => (
-          <div key={w} className="flex items-center gap-3">
-            <span className="size-7 shrink-0 rounded-md bg-white/10" />
+      <div className="absolute inset-0 flex flex-col justify-center gap-3 px-6 sm:px-8">
+        <div className="flex items-center justify-between text-[10px] tracking-wider text-slate-500 uppercase">
+          <span>Ad · CPA</span>
+          <span>L2 revenue</span>
+        </div>
+        {WINNERS.map(({ name, cpa, l2, bar, win }) => (
+          <div key={name} className="flex items-center gap-3">
+            <span className="w-40 shrink-0 truncate text-[11px] text-slate-300">
+              {name}{" "}
+              <span
+                className={win ? "text-emerald-400/90" : "text-slate-500"}
+              >
+                · {cpa}
+              </span>
+            </span>
+            <span className="flex-1">
+              <span
+                className={`block h-4 rounded-sm ${bar} ${
+                  win ? "bg-emerald-400/70" : "bg-white/12"
+                }`}
+              />
+            </span>
             <span
-              className={`h-5 rounded-sm ${w} ${
-                i === 0 ? "bg-emerald-400/70" : "bg-white/12"
+              className={`w-12 shrink-0 text-right font-mono text-[11px] ${
+                win
+                  ? "text-emerald-300"
+                  : l2 === "₹0"
+                    ? "text-red-400/90"
+                    : "text-slate-400"
               }`}
-            />
+            >
+              {l2}
+            </span>
           </div>
         ))}
       </div>
@@ -68,40 +112,58 @@ function TileWinners() {
   );
 }
 
-/* [feature-img-3] funnel drop-off */
+/* Funnel drop-off: the leak step is marked, labeled, and quantified. */
+const FUNNEL = [
+  { label: "Visit", h: "h-24", drop: false },
+  { label: "Form", h: "h-16", drop: false },
+  { label: "Pay", h: "h-7", drop: true },
+  { label: "L2", h: "h-5", drop: false },
+];
+
 function TileFunnel() {
-  const heights = ["h-24", "h-16", "h-10", "h-6"];
   return (
     <Tile>
-      <div className="absolute inset-0 flex items-end justify-center gap-5 px-8 pb-8">
-        {heights.map((h, i) => (
-          <span
-            key={h}
-            className={`w-12 rounded-t-md ${h} ${
-              i === heights.length - 1 ? "bg-red-400/50" : "bg-white/12"
-            }`}
-          />
+      <div className="absolute inset-0 flex items-end justify-center gap-6 px-8 pb-6">
+        {FUNNEL.map(({ label, h, drop }) => (
+          <div
+            key={label}
+            className="flex w-12 flex-col items-center gap-1.5"
+          >
+            {drop && (
+              <span className="rounded-full bg-red-400/15 px-1.5 py-0.5 font-mono text-[10px] text-red-400">
+                −71%
+              </span>
+            )}
+            <span
+              className={`w-full rounded-t-md ${h} ${
+                drop ? "bg-red-400/50" : "bg-white/12"
+              }`}
+            />
+            <span className="text-[10px] text-slate-500">{label}</span>
+          </div>
         ))}
       </div>
     </Tile>
   );
 }
 
-/* [feature-img-4] we do the wiring */
+/* We do the wiring: the setup checklist, already done. */
+const WIRING = [
+  "Landing pages — connected",
+  "Payment gateway — connected",
+  "Ads — mapped to sales",
+];
+
 function TileWiring() {
   return (
     <Tile>
       <div className="absolute inset-0 flex flex-col justify-center gap-4 px-6">
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="flex items-center gap-3">
-            <span className="flex size-5 items-center justify-center rounded-full bg-emerald-400/20">
-              <span className="size-1.5 rounded-full bg-emerald-400/80" />
+        {WIRING.map((label) => (
+          <div key={label} className="flex items-center gap-3">
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/20">
+              <Check size={11} className="text-emerald-400" strokeWidth={3} />
             </span>
-            <span
-              className={`h-2 rounded-full bg-white/12 ${
-                ["w-3/4", "w-1/2", "w-2/3"][i]
-              }`}
-            />
+            <span className="text-[11px] text-slate-400">{label}</span>
           </div>
         ))}
       </div>

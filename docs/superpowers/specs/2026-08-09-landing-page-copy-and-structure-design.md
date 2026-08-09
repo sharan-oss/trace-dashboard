@@ -60,7 +60,7 @@ No copy. Full-width product shot (Gemini-generated at image round; must match th
 
 H2: **What you'll see in week one**
 
-Layout: each block pairs copy with an image — build with placeholders `[feature-img-1..4]`, generate after the LP is built.
+Layout: each block pairs copy with a **CSS micro-infographic tile** (decided 2026-08-10 at build — no Gemini images for this section; the coded tiles with illustrative numbers communicate at a glance). Flagship tile shows the core insight: highest-CPA ad wins L2 revenue, cheapest-CPA ad earns ₹0.
 
 > **Every sale, matched to its ad** — Each payment is matched to the exact ad, ad set, and campaign that caused it. Not modeled. Matched.
 >
@@ -117,4 +117,4 @@ Minimal: logo + one-liner "Payment-level ad attribution for course businesses" +
 2. Where the page lives: route in this repo vs separate site/domain — undecided.
 3. Where "Request Access" submissions go: form → email? Supabase table (would need a deliberate `WITH CHECK` write policy or an anon-insert-only table — see auth rules)? Typeform? — undecided.
 4. Visual design round: light hero with dot pattern + grid; bring options to Sharan first per `.claude/rules/workflow.md`.
-5. Images (8 total, Gemini, after build): 1 dashboard shot + `[feature-img-1..4]` + `[how-img-1..3]`.
+5. Images (4 total, Gemini, after build): 1 dashboard shot + `[how-img-1..3]`. (Feature-block images cut 2026-08-10 — coded micro-infographic tiles are final.)

@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import type * as React from "react";
+import { RequestAccessButton } from "./cta-button";
+import { CONTACT_EMAIL } from "./config";
 import { Features } from "./features";
+import { FinalCta } from "./final-cta";
+import { HowItWorks } from "./how-it-works";
 import { ScrollGrow } from "./scroll-grow";
-import { TestimonialEditorial } from "./testimonial";
+import { TESTIMONIAL_SLOTS, TestimonialEditorial } from "./testimonial";
 
 export const metadata: Metadata = {
   title: "Trace — Optimize your ad account for L2 conversions",
@@ -82,13 +86,7 @@ export default function LandingPage() {
         </Rise>
 
         <Rise delay={240} className="mt-10 flex flex-col items-center gap-3">
-          {/* TODO: point at the request-access flow once its destination is decided */}
-          <a
-            href="#request-access"
-            className="rounded-full bg-(--lp-cta) px-8 py-4 text-base font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-(--lp-cta-hover)"
-          >
-            Request Access
-          </a>
+          <RequestAccessButton />
           <p className="text-sm text-(--lp-muted)">Zero setup on your side</p>
         </Rise>
 
@@ -109,9 +107,9 @@ export default function LandingPage() {
         </Rise>
       </section>
 
-      {/* Testimonial slot 1 — editorial pull-quote (Style A, locked 2026-08-10) */}
+      {/* Testimonial slot 1 — proves the promise (Style A, locked 2026-08-10) */}
       <section className="relative mx-auto w-full max-w-5xl px-6 pb-24">
-        <TestimonialEditorial />
+        <TestimonialEditorial {...TESTIMONIAL_SLOTS.provesThePromise} />
       </section>
 
       {/* Dashboard image — grows 80% → 100% width on scroll. Placeholder
@@ -141,6 +139,49 @@ export default function LandingPage() {
 
       {/* Section 5 — Top 4 features (bento) */}
       <Features />
+
+      {/* Testimonial slot 2 — kills the setup objection */}
+      <section className="relative mx-auto w-full max-w-5xl px-6 pb-32">
+        <TestimonialEditorial {...TESTIMONIAL_SLOTS.killsSetupObjection} />
+      </section>
+
+      {/* Section 7 — How it works */}
+      <HowItWorks />
+
+      {/* Testimonial slot 3 — the after-state */}
+      <section className="relative mx-auto w-full max-w-5xl px-6 pb-32">
+        <TestimonialEditorial {...TESTIMONIAL_SLOTS.afterState} />
+      </section>
+
+      {/* Section 9 — Final CTA (dark band, anchor target) */}
+      <FinalCta />
+
+      {/* Footer — minimal */}
+      <footer className="relative mx-auto flex w-full max-w-6xl flex-col items-center gap-4 border-t border-(--lp-line) px-6 py-10 text-center sm:flex-row sm:justify-between sm:text-left">
+        <div>
+          <span className="lp-display block text-lg font-bold tracking-tight text-(--lp-ink)">
+            Trace
+          </span>
+          <span className="text-sm text-(--lp-muted)">
+            Payment-level ad attribution for course businesses
+          </span>
+        </div>
+        <div className="flex items-center gap-6 text-sm">
+          <a
+            href="#request-access"
+            className="font-medium text-(--lp-ink) hover:underline"
+          >
+            Request Access
+          </a>
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className="text-(--lp-muted) hover:text-(--lp-ink)"
+          >
+            {CONTACT_EMAIL}
+          </a>
+          <span className="text-(--lp-faint)">© 2026 Trace</span>
+        </div>
+      </footer>
     </main>
   );
 }

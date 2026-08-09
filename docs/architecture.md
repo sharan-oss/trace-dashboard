@@ -15,7 +15,7 @@ Next.js Server Components (this repo)
   → src/app/**/page.tsx (server-side data fetching, no client-side fetch of tenant data)
 ```
 
-This dashboard never writes to Trace's tables and never uses Trace's secret/service-role key — see `.claude/rules/invariants.md` and `.claude/rules/auth-security.md` for the hard rules.
+This dashboard's application code never writes to Trace's five core tables and never uses Trace's secret/service-role key — see `.claude/rules/invariants.md` and `.claude/rules/auth-security.md` for the hard rules, including the one signed-off exception (a 2026-08-09 admin-run backfill migration) and the dashboard-owned tables that do carry deliberate write policies.
 
 ## Identity → claims → RLS, end to end
 
@@ -26,7 +26,7 @@ This dashboard never writes to Trace's tables and never uses Trace's secret/serv
 
 ## Phase 0 vs Phase 2 identity
 
-Today (Phase 0), there's no login UI. `src/lib/auth/dev-identity.ts` picks a JWT based on `DEV_ROLE`/`DEV_CLIENT_ID` env vars, sourced from two real Supabase Auth test users via `npm run dev:session` (`scripts/get-dev-session.ts`). This exercises the *real* RLS + hook pipeline above — it is not a bypass of RLS, just a stand-in for a login screen. See `docs/adr/002-env-driven-dev-identity-stub.md`.
+Today (Phase 0), there's no login UI. `src/lib/auth/dev-identity.ts` picks an identity from the `DEV_ROLE`/`DEV_CLIENT_ID` env vars and signs in as one of two real Supabase Auth test users via `signInWithPassword`, caching the session in memory per role and refreshing it lazily ~60s before expiry. This exercises the *real* RLS + hook pipeline above — it is not a bypass of RLS, just a stand-in for a login screen. See `docs/adr/002-env-driven-dev-identity-stub.md`, and `docs/adr/003-lazy-session-refresh-for-dev-identity-stub.md` for why the earlier `npm run dev:session` script and the static `DEV_ADMIN_JWT`/`DEV_CLIENT_JWT` vars were removed.
 
 Phase 2 replaces the stub's caller with a real Supabase Auth session (magic link or email/password) from an actual login page. Steps 2-4 above don't change — the hook and RLS policies are shared, not re-implemented.
 

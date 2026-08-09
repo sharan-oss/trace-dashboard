@@ -9,7 +9,8 @@ Two audiences: **Admin** (Sharan, full access across every client) and **Trace c
 ## RLS
 - Every table this dashboard reads has an RLS policy matching the relevant identity column against a JWT claim — `clients` on its own `id` (it IS the tenant), `products`/`sessions`/`events`/`payments` on their `client_id` foreign key. See `supabase/migrations/20260707000000_dashboard_rls_policies.sql`.
 - Admin access is a separate `is_admin` claim, OR'd into each policy's condition — not the secret/service-role key. The secret key bypasses RLS entirely; reserve it for one-off scripts run outside the app, never inside a request handler.
-- Policies are read-only (`USING` only, no `WITH CHECK`) — this dashboard never writes to Trace's tables. If a future feature needs writes, add `WITH CHECK` deliberately, don't assume it's covered.
+- Policies on **Trace's five core tables** are read-only (`USING` only, no `WITH CHECK`) — application code never writes to them, and a write is refused outright. The one exception is a one-off admin-run migration with Sharan's explicit sign-off (this has happened once: the 2026-08-09 Love School normalisation).
+- Tables **this dashboard owns** (`ads`, and Slice B's `ad_accounts`/`ad_insights_daily`/`sync_runs`) are the opposite case: they carry deliberate `WITH CHECK` policies on insert and update, permitting rows only when the JWT carries `is_admin`. This is required, not optional — in Postgres a `USING`-only policy denies writes entirely, and the service-role key is forbidden inside a request handler. If a future feature needs writes, add `WITH CHECK` deliberately; don't assume it's covered.
 - Test RLS policies via the actual client SDK with a real (or test) user JWT — **never** the Supabase SQL editor, which bypasses RLS.
 
 ## Claims — Custom Access Token Hook

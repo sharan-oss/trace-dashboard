@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type * as React from "react";
+import { ScrollGrow } from "./scroll-grow";
+import { TestimonialCard, TestimonialEditorial } from "./testimonial";
 
 export const metadata: Metadata = {
   title: "Trace — Optimize your ad account for L2 conversions",
@@ -104,6 +106,50 @@ export default function LandingPage() {
             &amp; course creators
           </p>
         </Rise>
+      </section>
+
+      {/*
+       * Testimonial slot 1 — TWO STYLES RENDERED FOR COMPARISON.
+       * Sharan picks one; delete the other and the dev labels.
+       */}
+      <section className="relative mx-auto w-full max-w-5xl space-y-16 px-6 pb-24">
+        <div className="space-y-6">
+          <p className="text-center text-xs font-semibold tracking-widest text-(--lp-faint) uppercase">
+            Style A — editorial pull-quote
+          </p>
+          <TestimonialEditorial />
+        </div>
+        <div className="space-y-6">
+          <p className="text-center text-xs font-semibold tracking-widest text-(--lp-faint) uppercase">
+            Style B — quiet card
+          </p>
+          <TestimonialCard />
+        </div>
+      </section>
+
+      {/* Dashboard image — grows 80% → 100% width on scroll. Placeholder
+          frame until the Gemini image round. */}
+      <section className="relative mx-auto w-full max-w-6xl px-6 pb-32">
+        <ScrollGrow>
+          <div className="relative flex aspect-video items-center justify-center border border-white/10 bg-linear-to-br from-slate-950 via-slate-900 to-slate-950">
+            {/* Faint skeleton hints so the frame reads as a product shot */}
+            <div
+              aria-hidden
+              className="absolute inset-x-0 top-0 flex items-center gap-1.5 border-b border-white/10 px-5 py-3.5"
+            >
+              <span className="size-2.5 rounded-full bg-white/15" />
+              <span className="size-2.5 rounded-full bg-white/15" />
+              <span className="size-2.5 rounded-full bg-white/15" />
+            </div>
+            <div
+              aria-hidden
+              className="absolute top-12 bottom-6 left-5 hidden w-36 rounded-xl border border-white/10 bg-white/5 sm:block"
+            />
+            <p className="relative max-w-xs text-center text-sm text-slate-500">
+              Dashboard preview — Gemini-generated image lands here
+            </p>
+          </div>
+        </ScrollGrow>
       </section>
     </main>
   );

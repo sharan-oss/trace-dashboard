@@ -3,7 +3,9 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
-const bentoTileVariants = cva("rounded-xl border border-border bg-card p-6", {
+const bentoTileVariants = cva(
+  "rounded-2xl border border-border bg-card p-5 backdrop-blur-md",
+  {
   variants: {
     size: {
       "1x1": "col-span-1 row-span-1",

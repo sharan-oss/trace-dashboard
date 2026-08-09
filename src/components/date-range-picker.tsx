@@ -14,7 +14,7 @@ export function DateRangePicker({ value }: { value: RangePreset }) {
     <div
       role="group"
       aria-label="Date range"
-      className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5"
+      className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-white/5 p-0.5"
     >
       {RANGE_OPTIONS.map((option) => {
         const active = option.value === value;
@@ -29,10 +29,10 @@ export function DateRangePicker({ value }: { value: RangePreset }) {
               })
             }
             className={cn(
-              "rounded-[5px] px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
+              "rounded-md px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
               active
                 ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                : "text-slate-400 hover:text-white",
             )}
           >
             {option.label}

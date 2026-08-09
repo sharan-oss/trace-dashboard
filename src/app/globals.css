@@ -2,12 +2,18 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * Trace Design System v2 — dark glass console (dark-only).
+ * Canonical reference: docs/design-system/trace-design-system.md.
+ * Token route (doc §6 option 2): shadcn components stay token-driven;
+ * these values remap every slot onto the Trace palette. Elevation is
+ * alpha (translucent white over the slate gradient), never shadows.
+ */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -35,6 +41,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -55,89 +62,79 @@
 }
 
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.229 0.050 262.971);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.229 0.050 262.971);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.229 0.050 262.971);
-  --primary: oklch(0.229 0.050 262.971);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.010 262.971);
-  --secondary-foreground: oklch(0.229 0.050 262.971);
-  --muted: oklch(0.96 0.010 262.971);
-  --muted-foreground: oklch(0.229 0.050 262.971 / 65%);
-  --accent: oklch(0.94 0.014 262.971);
-  --accent-foreground: oklch(0.229 0.050 262.971);
-  --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.979 0.021 166.113);
-  --success-foreground: oklch(0.508 0.105 165.612);
-  --warning: oklch(0.987 0.021 95.277);
-  --warning-foreground: oklch(0.555 0.146 48.998);
-  --danger: oklch(0.971 0.013 17.380);
-  --danger-foreground: oklch(0.505 0.190 27.518);
-  --border: oklch(0.229 0.050 262.971 / 10%);
-  --input: oklch(0.229 0.050 262.971 / 15%);
-  --ring: oklch(0.229 0.050 262.971 / 40%);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  /* 0.5rem (not the shadcn default 0.625rem) so radius-lg (8px) matches the design spec's inner-element radius target */
-  --radius: 0.5rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  /* Canvas: slate-950; the body paints the gradient (950 → 900 → 950). */
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(1 0 0);
+  /* Cards are translucent white-alpha; backdrop-blur applied per component. */
+  --card: oklch(1 0 0 / 5%);
+  --card-foreground: oklch(1 0 0);
+  /* Popovers/tooltips must be SOLID (slate-900) — they float over varied content. */
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(1 0 0);
+  /* Indigo — the only action color. */
+  --primary: oklch(0.511 0.262 276.966);          /* indigo-600 */
+  --primary-hover: oklch(0.585 0.233 277.117);    /* indigo-500 */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(1 0 0 / 8%);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(1 0 0 / 5%);
+  --muted-foreground: oklch(0.704 0.04 256.788);  /* slate-400 */
+  /* Active-state fill + text: indigo tint + indigo-300. */
+  --accent: oklch(0.585 0.233 277.117 / 12%);
+  --accent-foreground: oklch(0.785 0.115 274.713);
+  --destructive: oklch(0.704 0.191 22.216);       /* red-400 */
+  /* Status pairs, dark-inverted: translucent tint bg + light text.
+     Emerald/red per the design system; amber is a dashboard extension. */
+  --success: oklch(0.696 0.17 162.48 / 10%);
+  --success-foreground: oklch(0.765 0.177 163.223); /* emerald-400 */
+  --warning: oklch(0.769 0.188 70.08 / 10%);
+  --warning-foreground: oklch(0.828 0.189 84.429);  /* amber-400 */
+  --danger: oklch(0.637 0.237 25.331 / 10%);
+  --danger-foreground: oklch(0.704 0.191 22.216);   /* red-400 */
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.585 0.233 277.117 / 50%);
+  /* Chart series (2-series palette, decided 2026-08-10):
+     chart-1 = indigo-400, the hero line (L2 revenue — the 1.6x story);
+     chart-2 = slate-400 baseline (L1). 3–5 are reserved slate steps. */
+  --chart-1: oklch(0.673 0.182 276.935);
+  --chart-2: oklch(0.704 0.04 256.788);
+  --chart-3: oklch(0.554 0.046 257.417);
+  --chart-4: oklch(0.446 0.043 257.281);
+  --chart-5: oklch(0.372 0.044 257.287);
+  /* Design-system base radius (doc §2.5): rounded-lg = 10px, cards rounded-2xl. */
+  --radius: 0.625rem;
+  /* Sidebar: black/30 over the gradient, indigo active state. */
+  --sidebar: oklch(0 0 0 / 30%);
+  --sidebar-foreground: oklch(0.869 0.022 252.894); /* slate-300 */
+  --sidebar-primary: oklch(0.511 0.262 276.966);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.585 0.233 277.117 / 10%);
+  --sidebar-accent-foreground: oklch(0.785 0.115 274.713);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: oklch(0.585 0.233 277.117 / 50%);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 20%) transparent;
   }
   html {
     @apply font-sans;
+    color-scheme: dark;
+  }
+  body {
+    @apply text-foreground;
+    background: linear-gradient(
+      to bottom right,
+      oklch(0.129 0.042 264.695),
+      oklch(0.208 0.042 265.755),
+      oklch(0.129 0.042 264.695)
+    );
+  }
+  ::selection {
+    background: oklch(0.585 0.233 277.117 / 30%);
   }
 }

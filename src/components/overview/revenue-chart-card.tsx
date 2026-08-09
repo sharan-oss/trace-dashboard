@@ -1,5 +1,6 @@
 "use client";
 
+import { Lock } from "lucide-react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
   Card,
@@ -21,17 +22,18 @@ import type { RevenueDailyRow } from "@/lib/queries/overview";
 
 /**
  * The Overview chart card. Three tabs by design — Spends | Revenue | CPA —
- * but Spends and CPA are Meta-derived and stay disabled placeholders until
+ * but Spends and CPA are Meta-derived and stay locked placeholders until
  * the Meta account connects, so Revenue is the only live panel and there is
  * deliberately no tab state yet. No fake zero-lines for locked tabs.
  *
- * Two series max, greyscale tones only (L1 near-black 2px, L2 mid-grey
- * 1.5px) — the categorical chart palette decision stays deferred.
+ * Series palette (decided 2026-08-10, design system v2): L2 is the hero
+ * line in indigo (chart-1) at 2px — it is the 1.6x acquisition story — and
+ * L1 is the slate baseline (chart-2) at 1.5px. Two series max.
  */
 
 const chartConfig = {
-  l1_revenue_paise: { label: "L1 revenue", color: "var(--chart-5)" },
-  l2_revenue_paise: { label: "L2 revenue", color: "var(--chart-2)" },
+  l2_revenue_paise: { label: "L2 revenue", color: "var(--chart-1)" },
+  l1_revenue_paise: { label: "L1 revenue", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
 const dayTick = new Intl.DateTimeFormat("en-IN", {
@@ -49,8 +51,9 @@ function LockedTab({ label }: { label: string }) {
   return (
     <span
       title="Connect Meta to unlock"
-      className="cursor-not-allowed rounded-[5px] px-2.5 py-1 text-muted-foreground/50 select-none"
+      className="flex cursor-not-allowed items-center gap-1 rounded-md px-2.5 py-1 text-slate-600 select-none"
     >
+      <Lock size={11} aria-hidden="true" />
       {label}
     </span>
   );
@@ -61,15 +64,17 @@ export function RevenueChartCard({ data }: { data: RevenueDailyRow[] }) {
     <Card>
       <CardHeader className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <CardTitle className="font-heading text-base">Revenue</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-base font-semibold text-white">
+            Revenue
+          </CardTitle>
+          <CardDescription className="text-sm text-slate-400">
             Daily L1 and L2 revenue · Spends &amp; CPA unlock when Meta
             connects
           </CardDescription>
         </div>
-        <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 text-xs font-medium">
+        <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-white/5 p-0.5 text-xs font-medium">
           <LockedTab label="Spends" />
-          <span className="rounded-[5px] bg-accent px-2.5 py-1 text-accent-foreground">
+          <span className="rounded-md bg-accent px-2.5 py-1 text-accent-foreground">
             L1 + L2 Revenue
           </span>
           <LockedTab label="CPA" />
@@ -100,13 +105,13 @@ export function RevenueChartCard({ data }: { data: RevenueDailyRow[] }) {
               content={
                 <ChartTooltipContent
                   labelFormatter={formatDay}
-                  formatter={(value, name, item) => (
+                  formatter={(value, name) => (
                     <div className="flex w-full items-center justify-between gap-4">
-                      <span className="text-muted-foreground">
+                      <span className="text-slate-400">
                         {chartConfig[name as keyof typeof chartConfig]?.label ??
                           name}
                       </span>
-                      <span className="font-mono tabular-nums">
+                      <span className="font-mono tabular-nums text-white">
                         {formatINR(Number(value))}
                       </span>
                     </div>
@@ -117,15 +122,15 @@ export function RevenueChartCard({ data }: { data: RevenueDailyRow[] }) {
             <ChartLegend content={<ChartLegendContent />} />
             <Line
               type="monotone"
-              dataKey="l1_revenue_paise"
-              stroke="var(--color-l1_revenue_paise)"
+              dataKey="l2_revenue_paise"
+              stroke="var(--color-l2_revenue_paise)"
               strokeWidth={2}
               dot={false}
             />
             <Line
               type="monotone"
-              dataKey="l2_revenue_paise"
-              stroke="var(--color-l2_revenue_paise)"
+              dataKey="l1_revenue_paise"
+              stroke="var(--color-l1_revenue_paise)"
               strokeWidth={1.5}
               dot={false}
             />

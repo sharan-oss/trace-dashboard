@@ -1,17 +1,18 @@
-import type { Icon as IconsaxIcon } from "iconsax-react";
-import { TickCircle, Warning2, CloseCircle } from "iconsax-react";
+import { CheckCircle2, AlertTriangle, XCircle, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 type Status = "success" | "warning" | "danger";
 
-const STATUS_CONFIG: Record<
-  Status,
-  { icon: IconsaxIcon; bg: string; fg: string }
-> = {
-  success: { icon: TickCircle, bg: "bg-success", fg: "text-success-foreground" },
-  warning: { icon: Warning2, bg: "bg-warning", fg: "text-warning-foreground" },
-  danger: { icon: CloseCircle, bg: "bg-danger", fg: "text-danger-foreground" },
+/**
+ * Design-system status badge (§3.6): icon + word, colored text only — no
+ * filled background. Color never stands alone; the icon and label always
+ * accompany it.
+ */
+const STATUS_CONFIG: Record<Status, { icon: LucideIcon; fg: string }> = {
+  success: { icon: CheckCircle2, fg: "text-success-foreground" },
+  warning: { icon: AlertTriangle, fg: "text-warning-foreground" },
+  danger: { icon: XCircle, fg: "text-danger-foreground" },
 };
 
 export function StatusBadge({
@@ -23,17 +24,16 @@ export function StatusBadge({
   label: string;
   className?: string;
 }) {
-  const { icon: Icon, bg, fg } = STATUS_CONFIG[status];
+  const { icon: Icon, fg } = STATUS_CONFIG[status];
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium",
-        bg,
+        "inline-flex items-center gap-1 text-xs font-medium",
         fg,
         className,
       )}
     >
-      <Icon variant="Bulk" className="size-3.5" aria-hidden="true" />
+      <Icon size={12} aria-hidden="true" />
       {label}
     </span>
   );

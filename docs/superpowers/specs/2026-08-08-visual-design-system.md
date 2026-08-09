@@ -1,7 +1,7 @@
 # Visual Design System — Trace Dashboard
 
 Date: 2026-08-08 (updated 2026-08-08 after implementation to record two decisions made during build — see "Decisions confirmed during implementation" below)
-Status: Approved by Sharan, implemented on `worktree-visual-design-system`
+Status: **SUPERSEDED 2026-08-10** by `2026-08-10-visual-design-system-v2-dark.md` (dark Trace-aligned glass system). Kept for the reasoning record; do not style new work from this file.
 
 ## Why
 

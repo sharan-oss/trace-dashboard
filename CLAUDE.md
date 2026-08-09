@@ -14,7 +14,9 @@ Full project data model: `.claude/rules/data-model.md`. Hard rules: `.claude/rul
 
 ## Target Stack
 
-Match Trace's (`sharan-oss/trace`) **current `package.json`** — don't hardcode version numbers here, they drift. As of Phase 0 setup: Next.js 16.2.9 (App Router), React 19.2.4, TypeScript strict, `@supabase/supabase-js` ^2.108.2, Tailwind CSS v4, shadcn/ui (`base-nova` preset, neutral base) + Lucide React, deployed on Vercel. Exception: `StatusBadge` uses `iconsax-react` (`variant="Bulk"`) for its semantic status icons — a deliberate, scoped divergence chosen for visual character after comparing options live (see `docs/superpowers/specs/2026-08-08-visual-design-system.md`). Lucide remains installed and is still the default for any other icon use. Testing is **Vitest** in a Node environment (`vitest.config.ts`), added 2026-08-09 — it was not part of the original Phase 0 stack.
+Match Trace's (`sharan-oss/trace`) **current `package.json`** — don't hardcode version numbers here, they drift. As of Phase 0 setup: Next.js 16.2.9 (App Router), React 19.2.4, TypeScript strict, `@supabase/supabase-js` ^2.108.2, Tailwind CSS v4, shadcn/ui (`base-nova` preset, neutral base) + Lucide React (icons ≤ 18px), deployed on Vercel. Testing is **Vitest** in a Node environment (`vitest.config.ts`), added 2026-08-09 — it was not part of the original Phase 0 stack.
+
+**Visual design (2026-08-10):** the dashboard adopts Trace's own dark glass design system 1:1 — canonical recipes in `docs/design-system/trace-design-system.md`, dashboard-specific extensions in `docs/superpowers/specs/2026-08-10-visual-design-system-v2-dark.md`. Dark-only, alpha-based elevation (**never shadows**), indigo as the only action/highlight color, emerald/red strictly for status, slate text ladder, tokens in `globals.css` (never hardcode palette values in components).
 
 ## Auth
 

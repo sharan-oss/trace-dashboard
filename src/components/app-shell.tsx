@@ -25,16 +25,21 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col sm:flex-row">
-      <aside className="flex shrink-0 flex-col gap-4 border-b border-sidebar-border bg-sidebar p-4 text-sidebar-foreground sm:sticky sm:top-0 sm:h-screen sm:w-60 sm:border-b-0 sm:border-r">
-        <div className="px-2 font-heading text-lg font-semibold tracking-tight">
-          Trace
+      <aside className="flex shrink-0 flex-col gap-6 border-b border-sidebar-border bg-sidebar p-6 text-sidebar-foreground sm:sticky sm:top-0 sm:h-screen sm:w-60 sm:border-b-0 sm:border-r">
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-bold tracking-tight text-white">
+            Trace
+          </span>
+          <span className="rounded bg-white/5 px-2 py-0.5 text-xs font-medium text-slate-500">
+            dashboard
+          </span>
         </div>
         <SidebarNav />
         <div className="sm:mt-auto">
           <ClientSwitcher clients={clients} selectedId={selected?.id ?? null} />
         </div>
       </aside>
-      <main className="min-w-0 flex-1 bg-background">{children}</main>
+      <main className="min-w-0 flex-1 overflow-auto">{children}</main>
     </div>
   );
 }

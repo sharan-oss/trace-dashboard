@@ -30,19 +30,19 @@ export function ClientSwitcher({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="px-2 text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+      <p className="px-1 text-xs font-semibold tracking-wider text-slate-400 uppercase">
         Client
       </p>
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            "flex w-full items-center justify-between gap-2 rounded-md border border-sidebar-border bg-transparent px-2.5 py-2 text-left text-sm font-medium transition-opacity",
+            "flex w-full items-center justify-between gap-2 rounded-lg border border-sidebar-border bg-white/5 px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-white/8 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 focus:outline-none",
             isPending && "opacity-60",
           )}
           disabled={clients.length === 0}
         >
           <span className="truncate">{selected?.name ?? "No clients"}</span>
-          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+          <ChevronsUpDown size={14} className="shrink-0 text-slate-500" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-64">
           {clients.map((c) => (
@@ -51,13 +51,18 @@ export function ClientSwitcher({
               onClick={() => startTransition(() => selectClient(c.id))}
             >
               <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm">{c.name}</span>
-                <span className="truncate font-mono text-xs text-muted-foreground">
+                <span className="truncate text-sm text-slate-300">
+                  {c.name}
+                </span>
+                <span className="truncate font-mono text-xs text-slate-500">
                   {c.id}
                 </span>
               </span>
               {c.id === selectedId && (
-                <Check className="ml-auto size-4 shrink-0" />
+                <Check
+                  size={15}
+                  className="ml-auto shrink-0 text-accent-foreground"
+                />
               )}
             </DropdownMenuItem>
           ))}

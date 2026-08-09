@@ -121,3 +121,23 @@
     animation: none;
   }
 }
+
+/* Live-payment pulse (dashboard mock). */
+@keyframes lp-ping {
+  0% {
+    box-shadow: 0 0 0 0 rgb(52 211 153 / 45%);
+  }
+  100% {
+    box-shadow: 0 0 0 7px rgb(52 211 153 / 0%);
+  }
+}
+
+.lp-ping {
+  animation: lp-ping 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-ping {
+    animation: none;
+  }
+}

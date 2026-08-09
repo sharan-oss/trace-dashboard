@@ -483,6 +483,7 @@ Tasks 1 and 2 are complete and merged into the branch. Everything below was rewr
 - Sharan's new URL template is already live on 1,043 sessions. **29 of them carry `campaign_id=` with no `utm_id=`, and the shipped `metric_campaign_id_from_url` misses every one** because it reads only `utm_id`. That count grows as the template rolls out.
 - `fbc_id` is present on 2,037 sessions and numeric `utm_term` on 4,695; where both appear they never disagree (0 of 1,973), so a single scan-and-filter ad set helper is safe.
 - Ad names are genuinely unsafe to match unscoped: 14 of Love School's 49 names are reused across ads, and one name is duplicated **inside a single campaign**. That last row must resolve to no ad at all rather than guess.
+- **Correction to child spec 01 and to this plan's first draft:** the 16 payments with no `session_id` are NOT "permanently unattributable". Verified live — 9 of them resolve at ad tier. A payment carries its own `utm_params`, so it attributes independently of any session. Only 7 are genuinely unresolved. Anything asserting the stronger claim is wrong.
 
 **Additional Global Constraints introduced by this revision** (they bind every task below, on top of the original Global Constraints section):
 
@@ -1433,15 +1434,34 @@ describe(`${VIEW} — three-tier attribution`, () => {
     }
   });
 
-  it("leaves payments with no session unattributed at every tier", async () => {
-    // 16 payments have no session_id and are permanently unattributable.
+  it("attributes payments from their own utm_params even with no session", async () => {
+    // Corrected 2026-08-09: the spec called the 16 session-less payments
+    // "permanently unattributable". That is false — 9 of them resolve at ad
+    // tier, because a payment carries its own utm_params and never depends on
+    // a session to attribute. This test pins that independence.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
-      .select("session_id, attribution_tier")
+      .select("session_id, ad_key, adset_key, campaign_key, attribution_tier")
       .is("session_id", null);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
+
+    const attributed = data!.filter((r) => r.attribution_tier === "ad");
+    expect(attributed.length).toBeGreaterThan(0);
+    for (const row of attributed) expect(row.ad_key).not.toBeNull();
+
+    for (const row of data!) {
+      const expected =
+        row.ad_key !== null
+          ? "ad"
+          : row.adset_key !== null
+            ? "adset"
+            : row.campaign_key !== null
+              ? "campaign"
+              : "none";
+      expect(row.attribution_tier).toBe(expected);
+    }
   });
 });
 
@@ -1501,7 +1521,7 @@ git commit -m "feat(db): add v_payments_attributed with three-tier attribution"
 Unchanged in substance by the revision — the funnel does not touch attribution. Renumbered only.
 
 **Files:**
-- Create: `supabase/migrations/20260809140400_v_funnel_by_session.sql`
+- Create: `supabase/migrations/20260809140500_v_funnel_by_session.sql`
 - Create: `tests/v-funnel-by-session.test.ts`
 
 **Interfaces:**
@@ -1509,7 +1529,7 @@ Unchanged in substance by the revision — the funnel does not touch attribution
 
 - [ ] **Step 1: Write the migration file**
 
-`supabase/migrations/20260809140400_v_funnel_by_session.sql`:
+`supabase/migrations/20260809140500_v_funnel_by_session.sql`:
 
 ```sql
 -- One row per session with a boolean per funnel stage, computed as "reached
@@ -1653,7 +1673,7 @@ Expected: PASS.
 
 ```bash
 npm run typecheck
-git add supabase/migrations/20260809140400_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
+git add supabase/migrations/20260809140500_v_funnel_by_session.sql tests/v-funnel-by-session.test.ts
 git commit -m "feat(db): add v_funnel_by_session with reached-or-beyond semantics"
 ```
 

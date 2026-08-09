@@ -52,9 +52,9 @@ Rule: genuine client quotes, tightened without changing meaning. Attribution = f
 - **Slot 3 — after How it works.** Job: the after-state — confidence/scale once they knew their winners.
   *Example shape:* "First month we found our real winner and put 3x the budget on it. Best month we've had."
 
-## Section 3 — Dashboard image
+## Section 3 — Dashboard mock
 
-No copy. Full-width product shot (Gemini-generated at image round; must match the real dark-glass dashboard).
+No copy. Full-width **coded** product mock (decided 2026-08-10 — no Gemini image; a coded dark-glass dashboard matches the page and the real product): sidebar nav, KPI row (L2/L1 revenue, sessions, L2 ROAS), indigo L2 revenue chart over slate L1 baseline, top-ads-by-L2 list. Grows 80%→100% width on scroll. Numbers illustrative.
 
 ## Section 4 — Top 4 features
 
@@ -117,4 +117,4 @@ Minimal: logo + one-liner "Payment-level ad attribution for course businesses" +
 2. Where the page lives: route in this repo vs separate site/domain — undecided.
 3. Where "Request Access" submissions go: form → email? Supabase table (would need a deliberate `WITH CHECK` write policy or an anon-insert-only table — see auth rules)? Typeform? — undecided.
 4. Visual design round: light hero with dot pattern + grid; bring options to Sharan first per `.claude/rules/workflow.md`.
-5. Images (4 total, Gemini, after build): 1 dashboard shot + `[how-img-1..3]`. (Feature-block images cut 2026-08-10 — coded micro-infographic tiles are final.)
+5. Images: possibly none. Dashboard shot and feature blocks are coded (2026-08-10). `[how-img-1..3]` also have coded step-tiles built; Gemini generation only if Sharan wants to replace them.

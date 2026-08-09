@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type * as React from "react";
 import { RequestAccessButton } from "./cta-button";
 import { CONTACT_EMAIL } from "./config";
+import { DashboardMock } from "./dashboard-mock";
 import { Features } from "./features";
 import { FinalCta } from "./final-cta";
 import { HowItWorks } from "./how-it-works";
@@ -112,28 +113,10 @@ export default function LandingPage() {
         <TestimonialEditorial {...TESTIMONIAL_SLOTS.provesThePromise} />
       </section>
 
-      {/* Dashboard image — grows 80% → 100% width on scroll. Placeholder
-          frame until the Gemini image round. */}
+      {/* Dashboard mock (coded, no image) — grows 80% → 100% width on scroll */}
       <section className="relative mx-auto w-full max-w-6xl px-6 pb-32">
         <ScrollGrow>
-          <div className="relative flex aspect-video items-center justify-center border border-white/10 bg-linear-to-br from-slate-950 via-slate-900 to-slate-950">
-            {/* Faint skeleton hints so the frame reads as a product shot */}
-            <div
-              aria-hidden
-              className="absolute inset-x-0 top-0 flex items-center gap-1.5 border-b border-white/10 px-5 py-3.5"
-            >
-              <span className="size-2.5 rounded-full bg-white/15" />
-              <span className="size-2.5 rounded-full bg-white/15" />
-              <span className="size-2.5 rounded-full bg-white/15" />
-            </div>
-            <div
-              aria-hidden
-              className="absolute top-12 bottom-6 left-5 hidden w-36 rounded-xl border border-white/10 bg-white/5 sm:block"
-            />
-            <p className="relative max-w-xs text-center text-sm text-slate-500">
-              Dashboard preview — Gemini-generated image lands here
-            </p>
-          </div>
+          <DashboardMock />
         </ScrollGrow>
       </section>
 

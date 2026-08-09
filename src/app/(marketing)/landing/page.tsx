@@ -39,8 +39,10 @@ function Rise({
 export default function LandingPage() {
   return (
     <main className="relative overflow-hidden">
-      {/* Hero backdrop: dots + grid, faded below the fold */}
+      {/* Hero backdrop: corner washes under dots+grid, bright center spotlight on top */}
+      <div aria-hidden className="lp-hero-wash absolute inset-0" />
       <div aria-hidden className="lp-hero-pattern absolute inset-0" />
+      <div aria-hidden className="lp-hero-spotlight absolute inset-0" />
 
       {/* Slim header */}
       <header className="relative mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">

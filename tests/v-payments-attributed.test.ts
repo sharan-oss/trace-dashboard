@@ -178,6 +178,7 @@ describe(`${VIEW} — three-tier attribution`, () => {
     const admin = await adminClient();
     const { data, error } = await admin.from(VIEW).select("ad_key, ad_key_type").limit(1000);
     if (error) throw new Error(error.message);
+    expect(data!.length).toBeGreaterThan(0);
     for (const row of data!) {
       expect(["ad_id", "ad_name", "none"]).toContain(row.ad_key_type);
       if (row.ad_key_type === "none") expect(row.ad_key).toBeNull();
@@ -310,13 +311,14 @@ describe(`${VIEW} — three-tier attribution`, () => {
 // the view. Task 4 already covers the shared rule's own correctness
 // (ambiguity guard, cross-tenant guard); what's missing here is proof that
 // THIS view still wires it in. A structural check on the view's own
-// definition (via the debug_v_payments_attributed_definition() probe added
-// alongside this fix, see migration 20260809140400) closes that gap without
-// depending on live data ever landing in that tier.
+// definition (via the v_payments_attributed_definition_probe() RPC added
+// alongside this fix, see migration 20260809140400, locked to `authenticated`
+// only and renamed off its original `debug_` prefix in 20260809140600) closes
+// that gap without depending on live data ever landing in that tier.
 describe(`${VIEW} — shared join wiring (structural)`, () => {
   it("still joins public.v_ad_name_resolution in its view definition", async () => {
     const admin = await adminClient();
-    const { data, error } = await admin.rpc("debug_v_payments_attributed_definition");
+    const { data, error } = await admin.rpc("v_payments_attributed_definition_probe");
     if (error) throw new Error(error.message);
     expect(data).toContain("v_ad_name_resolution");
   });

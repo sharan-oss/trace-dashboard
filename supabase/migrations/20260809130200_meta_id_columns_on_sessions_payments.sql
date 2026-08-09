@@ -9,12 +9,18 @@
 -- Manager template puts all three ids in the URL); Slice A views bridge with
 -- coalesce(stored, extracted).
 
+-- `if not exists` on every column: Trace's own repository adds these same
+-- three columns independently, and the two repos' migration timelines are
+-- interleaved in production, so replaying this file against a database that
+-- already carries Trace's current schema must not fail with "column already
+-- exists". The columns already exist live -- this file is not re-applied,
+-- only made safe to replay.
 alter table public.sessions
-  add column campaign_id text,
-  add column adset_id text,
-  add column ad_id text;
+  add column if not exists campaign_id text,
+  add column if not exists adset_id text,
+  add column if not exists ad_id text;
 
 alter table public.payments
-  add column campaign_id text,
-  add column adset_id text,
-  add column ad_id text;
+  add column if not exists campaign_id text,
+  add column if not exists adset_id text,
+  add column if not exists ad_id text;

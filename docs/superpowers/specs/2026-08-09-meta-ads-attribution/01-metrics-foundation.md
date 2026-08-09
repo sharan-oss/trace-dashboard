@@ -64,14 +64,14 @@ Over `payments`, joined to `clients` for the test account signal. Adds:
 | `campaign_key` | `coalesce(campaign_id, utm_params utm_id or campaign_id)`, else via `ads` |
 | `is_paid` | `status = 'paid' OR paid_at IS NOT NULL`. Four rows are paid with a null `paid_at` |
 | `is_test_payment` | `amount <= 500` (Rs 5 in paise) |
-| `is_test_client` | `clients.razorpay_key_id LIKE 'rzp\_test%'` with the underscore escaped |
+| `is_test_client` | `starts_with(clients.razorpay_key_id, 'rzp_test')` — **corrected 2026-08-09**: the implementation uses `starts_with()`, not `LIKE 'rzp\_test%'`, precisely to avoid the underscore-wildcard trap this same spec warns about a few lines above (`_` is a single-character wildcard in `LIKE`/`ILIKE`) |
 | `day_ist` | `COALESCE(paid_at, created_at)` converted to Asia/Kolkata, cast to date |
 
 Only the named `utm_params` keys above are ever read by name. The key space is unbounded because campaign names leak into it as keys, so nothing may enumerate keys generically.
 
 ### View: `v_funnel_by_session`
 
-Over `events`. One row per session with a boolean per stage, computed as **reached this stage or any later stage**, not as "fired this event". Real data has 294 sessions reaching `form_start` without `form_open` and 72 reaching `payment_complete` without `form_open`; counting raw events makes later stages exceed earlier ones and inverts the drop off chart.
+Over `sessions LEFT JOIN events` — **corrected 2026-08-09**: not "over `events`", which was a description of a rejected implementation. The `LEFT JOIN` is deliberate, so the ~900 sessions that fired no event at all still get a row with every stage false; building this over `events` alone would silently drop them and understate top-of-funnel. One row per session with a boolean per stage, computed as **reached this stage or any later stage**, not as "fired this event". Real data has 294 sessions reaching `form_start` without `form_open` and 72 reaching `payment_complete` without `form_open`; counting raw events makes later stages exceed earlier ones and inverts the drop off chart.
 
 ### Metric definitions
 
@@ -92,7 +92,7 @@ The join runs in three tiers, per the cross child contract in [index.md](index.m
 
 ### Unattributed bucket
 
-Any breakdown grouping by `ad_key`, `adset_key` or `campaign_key` must emit an explicit `Unattributed` row for rows resolving nothing at that tier, rather than filtering them. Applies to 16 payments with no `session_id`, plus every row where no key resolved. A campaign tier row is attributed in campaign rollups and Unattributed in ad rollups; both statements are true and both must hold. The invariant is that grouped rows plus Unattributed equals the ungrouped total at every tier.
+Any breakdown grouping by `ad_key`, `adset_key` or `campaign_key` must emit an explicit `Unattributed` row for rows resolving nothing at that tier, rather than filtering them. **Corrected 2026-08-09**: this does not apply to "16 payments with no `session_id`" as a fixed unattributable set — payments resolve `ad_key`/`adset_key`/`campaign_key` from their own `utm_params`, independently of any session, so a null `session_id` does not imply unattributed. Of the 16 payments with no `session_id`, 9 resolve at the ad tier; only 7 land in `none`. The bucket applies to every row where no key resolved, full stop, regardless of `session_id`. A campaign tier row is attributed in campaign rollups and Unattributed in ad rollups; both statements are true and both must hold. The invariant is that grouped rows plus Unattributed equals the ungrouped total at every tier.
 
 ### Security
 
@@ -105,7 +105,7 @@ Already done (2026-08-09, migrations `ads_dimension_table`, `seed_love_school_ad
 1. Extend the metric helpers: adset extraction (`fbc_id`, else `utm_term` under the numeric guard) and campaign extraction widened to `utm_id` or `campaign_id`, keeping `metric_campaign_id_from_url`'s signature. Reuse `metric_normalize_ad_id` and `metric_normalize_key`; never re derive the regexes.
 2. Create `v_sessions_attributed` with `security_invoker`, reading `coalesce(stored id, extracted)`, satisfies **AC-1**, **AC-4**.
 3. Create `v_payments_attributed`, satisfies **AC-1**, **AC-2**, **AC-4**.
-4. Create `v_funnel_by_session` using reached or beyond semantics, satisfies **AC-3**.
+4. Create `v_funnel_by_session` using reached or beyond semantics. **Corrected 2026-08-09**: this step maps to no AC directly — AC-3 is the two separately-named conversion metrics (satisfied by step 5 below), not the funnel view itself.
 5. Expose both named metrics in the query layer, satisfies **AC-3**.
 6. Add the adset and campaign fallback tiers and the Unattributed bucket to every grouping helper, satisfies **AC-5**, **AC-20**.
 7. Verify all views under a client JWT and an admin JWT, including `ads`, satisfies **AC-6**.

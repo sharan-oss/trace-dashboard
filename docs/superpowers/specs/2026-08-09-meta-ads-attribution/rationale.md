@@ -5,12 +5,16 @@ Decision record for [index.md](index.md). `/develop` does not need this file.
 ## Context
 
 > ⚠️ Premise note: the original topic asked for ROAS and CPA, but the database has no cost side data at all, and the numbers it does have are not yet trustworthy. A profiling pass over the live database on 2026-08-08 found three problems that would each corrupt an ad performance view built today: 15% of sessions carry a malformed `utm_source`, the funnel event sequence is not monotonic, and one of the two real clients has no ad identifiers whatsoever. Building the Meta integration first would produce precise looking ROAS numbers resting on a broken join. The right framing is to fix the meaning of the existing data first (child 01, no Meta dependency), then add spend. That reordering is why this spec is an umbrella rather than a single Meta integration spec.
+>
+> **Corrected 2026-08-09**: "one of the two real clients has no ad identifiers whatsoever" is false. That client (Love School) carried a real ad identifier under a differently-spelled key on 34% of its payments even before the backfill, and after the 2026-08-09 one-time normalisation, 7,757 of its 8,252 sessions (94%) resolve an ad key. See the correction below and in `01-metrics-foundation.md`.
 
 The dashboard reads a live, actively growing dataset: 4 clients, 7 products, 10,395 sessions, 14,742 events and 959 payments spanning 2026-06-27 to now. Two clients carry real revenue (Love School at Rs 45,251 and Occultyogis Vastu at Rs 11,888), one is a Rs 7 test, and one is an empty shell on a test Razorpay key. Total paid revenue is Rs 57,146 across 600 paid payments from 959 attempts.
 
 The forces shaping this decision:
 
 **The two real clients tag their ads incompatibly.** Occultyogis carries a full Meta hierarchy in `utm_params` (`utm_id` for campaign, `fbc_id` for ad set, `h_ad_id` and `Ad_id` for ad) on roughly 90% of paid payments and 83% of sessions. Love School carries no ad identifier on any session at all, and only a differently spelled `Ad ID` key on 34% of payments. Any join design that assumes one identifier scheme silently produces nothing for one of the two paying clients.
+>
+> **Corrected 2026-08-09**: "Love School carries no ad identifier on any session at all" is false. That zero was a profiling artifact: the session-side scan checked `Ad_id` / `h_ad_id` / `Ad ID`, but missed the space-as-plus URL encoding `Ad+ID`, which 34% of Love School's *sessions* (2,740 of 8,253) carried before the backfill — a separate stat from the already-correct "34% of payments" figure in this same sentence, which uses the `Ad ID` / `Ad_id` / `h_ad_id` spellings and was measuring payments, not sessions. After the 2026-08-09 one-time normalisation, 7,757 of 8,252 Love School sessions (94%) now resolve an ad key.
 
 **The `utm_params` key space is unbounded.** Campaign names appear as JSON keys, because unencoded `&` and `=` characters in ad URLs are parsed into bogus keys. Case variants of real keys coexist (`Ad ID`, `Ad_id`, `Adset content`, `Adset Content`, `Adset_Content`). Nothing may enumerate these keys generically.
 
@@ -136,7 +140,7 @@ The zero is the single most consequential number in this profile. It is why the 
 - `tti_ms` is populated on 0 of 10,395 sessions. `network_type` 46.6% and `device_ram_gb` 48.1%.
 - 4 payments have `status = 'paid'` with a null `paid_at`, so `status = 'paid' OR paid_at IS NOT NULL` is the safe predicate.
 - 146 paid payments have `raw_payload = '{}'`, which matches the documented webhook not registered case in `.claude/rules/invariants.md` and is expected rather than broken.
-- 16 payments have no `session_id` and are therefore permanently unattributable.
+- 16 payments have no `session_id` and are therefore permanently unattributable. **Corrected 2026-08-09**: false — payments attribute from their own `utm_params`, independently of any session. Of the 16, 9 resolve at the ad tier and only 7 are genuinely unresolved.
 - `minutes_to_convert` has a median of 0 and a maximum of 25, because it only measures within session time. It cannot support a time to convert view.
 - `utm_medium` carries placement for one client (`Instagram_Reels`) and campaign names for another (`Love +Reality Show - 12/12/2025`), so its meaning is not consistent across tenants.
 

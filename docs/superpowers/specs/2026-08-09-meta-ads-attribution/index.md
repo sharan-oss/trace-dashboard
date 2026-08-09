@@ -217,6 +217,7 @@ Done 2026-08-09 ahead of the views: the `ads` table (pulled forward from child 0
 - Attribution stays last touch and single session. A customer who clicks an ad and returns later through a direct visit credits the later session, so ad level revenue is systematically understated for considered purchases.
 - Four new tables and a scheduled job add operational surface to a project that currently has almost none. There is now something that can silently stop working overnight.
 - Keeping test rows visible rather than filtering them means every headline number includes a small amount of test revenue. At roughly five transactions per launch this is immaterial, but it is not zero.
+- **Discovered 2026-08-09**: for 5 of 963 paired session/payment rows (4 of them paid, Rs 396 / 39,600 paise, 0.68% of paid revenue), the session resolves an ad while its own payment resolves nothing, so one customer journey splits across two ads in a per-ad rollup. The root cause is upstream, not in these views: the ad id sits after a `#` fragment in the landing URL, and Trace's payment capture copied only the pre-fragment query parameters into `utm_params`, so the 2026-08-09 backfill could fill `sessions.ad_id` but had nothing to fill `payments.ad_id` with. Slice D rolls revenue up by ad and will surface this split directly.
 
 **Neutral**:
 

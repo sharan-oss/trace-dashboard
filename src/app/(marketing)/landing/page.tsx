@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type * as React from "react";
+import { Features } from "./features";
 import { ScrollGrow } from "./scroll-grow";
 import { TestimonialEditorial } from "./testimonial";
 
@@ -137,6 +138,9 @@ export default function LandingPage() {
           </div>
         </ScrollGrow>
       </section>
+
+      {/* Section 5 — Top 4 features (bento) */}
+      <Features />
     </main>
   );
 }

@@ -39,7 +39,7 @@ Last updated: 2026-08-09 (Slice A merged to main; Slice B planned and ready to b
 
 ## Current state
 
-`main` holds all of Slice A and is **17 commits ahead of `origin/main` — nothing has been pushed.** Working tree clean. Currently on branch `slice-b-meta-ads-sync`.
+`main` holds all of Slice A and is **pushed to `origin/main`** (2026-08-09). Vercel deploys from `main`; the deploy is a visual no-op because the only new application files, `src/lib/metrics/definitions.ts` and `attribution.ts`, have no consumer yet and `src/app/page.tsx` is unchanged. Note the database has been ahead of the deployed code since the migrations were applied.
 
 Live coverage through the views: 9,789 of 10,693 sessions resolve an ad. Love School 94% via stored IDs, Occultyogis 86% via extraction with no `ads` rows at all.
 

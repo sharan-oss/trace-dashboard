@@ -74,7 +74,20 @@ select
   (k.status = 'paid' or k.paid_at is not null) as is_paid,
   (k.amount <= 500) as is_test_payment,
   coalesce(starts_with(c.razorpay_key_id, 'rzp_test'), false) as is_test_client,
-  (coalesce(k.paid_at, k.created_at) at time zone 'Asia/Kolkata')::date as day_ist
+  (coalesce(k.paid_at, k.created_at) at time zone 'Asia/Kolkata')::date as day_ist,
+  -- Appended last, deliberately: `create or replace view` can only add columns
+  -- at the end, never insert them mid-list, so putting this beside the other
+  -- customer_* columns would force a drop-and-recreate. Column order is
+  -- irrelevant here — every caller selects by name.
+  --
+  -- customer_id links an L1 payment to its customer, and through
+  -- customers.l1_payment_id onward to that customer's later L2 purchases in
+  -- external_payments. It is the join key for ad -> L1 -> customer -> L2, which
+  -- is the entire point of the attribution product. Added 2026-08-10 once the
+  -- column appeared on payments; the base-column parity test in
+  -- tests/v-payments-attributed.test.ts caught its absence, which is exactly
+  -- what that test exists for.
+  k.customer_id
 from keyed k
 left join public.ads a
   on a.meta_ad_id = coalesce(k.ad_id_resolved, k.ad_id_from_name)

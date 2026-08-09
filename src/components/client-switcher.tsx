@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { selectClient } from "@/app/actions";
+import { selectClient } from "@/app/(dashboard)/actions";
 import {
   DropdownMenu,
   DropdownMenuContent,

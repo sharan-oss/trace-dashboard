@@ -1,0 +1,76 @@
+/*
+ * Landing page styles — everything marketing-only lives in this folder,
+ * imported by the (marketing) layouts; nothing here leaks into the dark
+ * dashboard (all rules are scoped under `.lp`, set on the LP wrapper).
+ *
+ * Palette approved 2026-08-10: warm paper canvas, deep navy ink, the app's
+ * indigo as the one action color, dark blocks allowed as contrast moments
+ * (never a pure-dark page).
+ * Copy/structure spec: docs/superpowers/specs/2026-08-09-landing-page-copy-and-structure-design.md
+ */
+
+.lp {
+  --lp-canvas: #fafaf7;
+  --lp-ink: #0d1b2e;
+  --lp-body: #475569; /* slate-600 */
+  --lp-muted: #64748b; /* slate-500 */
+  --lp-faint: #94a3b8; /* slate-400 */
+  --lp-line: #e2e8f0; /* slate-200 */
+  --lp-dot: #cbd5e1; /* slate-300 */
+  --lp-accent: #4f46e5; /* indigo-600 — same action indigo as the app */
+  --lp-accent-hover: #6366f1; /* indigo-500 */
+  --lp-tint: #eef2ff; /* indigo-50 */
+  --lp-tint-line: #c7d2fe; /* indigo-200 */
+  color-scheme: light;
+  background: var(--lp-canvas);
+  color: var(--lp-body);
+}
+
+.lp ::selection {
+  background: oklch(0.585 0.233 277.117 / 20%);
+}
+
+/* Display face for headlines/wordmark; body stays on Geist via --font-sans. */
+.lp-display {
+  font-family: var(--font-vend-sans), var(--font-geist-sans), sans-serif;
+}
+
+/* Hero backdrop: dot matrix over a faint grid, fading out below the fold. */
+.lp-hero-pattern {
+  background-image:
+    radial-gradient(circle, var(--lp-dot) 1px, transparent 1px),
+    linear-gradient(to right, var(--lp-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--lp-line) 1px, transparent 1px);
+  background-size:
+    24px 24px,
+    96px 96px,
+    96px 96px;
+  mask-image: radial-gradient(
+    ellipse 120% 90% at 50% 0%,
+    black 30%,
+    transparent 75%
+  );
+}
+
+/* Staggered hero entrance (CSS-only). */
+@keyframes lp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lp-rise {
+  animation: lp-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--lp-rise-delay, 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-rise {
+    animation: none;
+  }
+}

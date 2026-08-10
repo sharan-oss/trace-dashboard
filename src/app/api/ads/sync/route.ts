@@ -61,6 +61,12 @@ const Body = z
     date: z.string().regex(DAY).optional(),
     date_from: z.string().regex(DAY).optional(),
     date_to: z.string().regex(DAY).optional(),
+    // 'backfill' marks the run for the backfill script's resumability check;
+    // 'nightly' is reserved for the GET orchestrator.
+    kind: z.enum(["manual", "backfill"]).default("manual"),
+    // The local backfill passes a huge limit for the uncapped initial mirror;
+    // interactive calls keep the nightly cap.
+    thumbnail_limit: z.number().int().positive().max(100_000).optional(),
   })
   .refine((b) => (b.date ? !b.date_from && !b.date_to : Boolean(b.date_from && b.date_to)), {
     message: "provide either date, or date_from and date_to",
@@ -107,10 +113,16 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const result = await runAdAccountSync(
-      { db, meta, apiCallCount: () => apiCalls, thumbnails: { limit: NIGHTLY_THUMBNAIL_CAP } },
+      {
+        db,
+        meta,
+        apiCallCount: () => apiCalls,
+        thumbnails: { limit: parsed.data.thumbnail_limit ?? NIGHTLY_THUMBNAIL_CAP },
+      },
       account,
       dateFrom,
-      dateTo
+      dateTo,
+      parsed.data.kind
     );
     if (result.conflict) {
       return Response.json(

@@ -30,3 +30,24 @@ export function checkoutCompletion(
 ): number | null {
   return ratio(paidPayments, paymentAttempts);
 }
+
+/**
+ * The ad-economics ratios, decided 2026-08-10 (Slice D design doc): ROAS
+ * credits the full customer value — L1 plus the L2 revenue already
+ * acquisition-credited to the ad — while CPA is pure acquisition cost. The
+ * labels carry the definition so neither can ever read as a plain "ROAS"/"CPA"
+ * whose meaning drifts.
+ */
+export const META_SPEND_LABEL = "Meta spend";
+export const ROAS_LABEL = "ROAS (L1+L2)";
+export const CPA_LABEL = "CPA (L1)";
+
+/** (L1+L2) revenue ÷ Meta spend, both in paise. Null when spend is zero. */
+export function roas(totalRevenuePaise: number, spendPaise: number): number | null {
+  return ratio(totalRevenuePaise, spendPaise);
+}
+
+/** Meta spend ÷ L1 paid count, in paise per buyer. Null when no buyers. */
+export function cpa(spendPaise: number, l1PaidCount: number): number | null {
+  return ratio(spendPaise, l1PaidCount);
+}

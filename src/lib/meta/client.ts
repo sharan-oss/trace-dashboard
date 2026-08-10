@@ -60,7 +60,8 @@ export type MetaClientOptions = {
 export type MetaClient = {
   listAdAccounts(): Promise<MetaAdAccount[]>;
   listAds(adAccountId: string): Promise<MetaAd[]>;
-  getAdInsights(adAccountId: string, dateStart: string): Promise<MetaInsightRow[]>;
+  /** One row per ad per day over [since, until], both inclusive YYYY-MM-DD. */
+  getAdInsights(adAccountId: string, since: string, until: string): Promise<MetaInsightRow[]>;
 };
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -194,13 +195,13 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
       );
     },
 
-    async getAdInsights(adAccountId, dateStart) {
+    async getAdInsights(adAccountId, since, until) {
       return requestAll<MetaInsightRow>(
         endpoint(`${adAccountId}/insights`, {
           level: "ad",
           time_increment: "1",
           fields: "ad_id,spend,impressions,clicks,reach",
-          time_range: JSON.stringify({ since: dateStart, until: dateStart }),
+          time_range: JSON.stringify({ since, until }),
           limit: "500",
         })
       );

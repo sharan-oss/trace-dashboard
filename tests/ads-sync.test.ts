@@ -106,6 +106,7 @@ describe("runAdAccountSync", () => {
     const result = await runAdAccountSync(
       { db, meta: fakeMeta([AD_1, AD_2], [insightRow("test_sync_ad_1", "12.34")]) },
       account,
+      DATE,
       DATE
     );
 
@@ -146,10 +147,46 @@ describe("runAdAccountSync", () => {
     expect(run?.finished_at).toBeTruthy();
   });
 
+  it("writes one row per ad-day across a multi-day window", async () => {
+    const day2 = "2020-01-02";
+    const rows = [insightRow("test_sync_ad_1", "1.00"), { ...insightRow("test_sync_ad_2", "2.00"), date_start: day2, date_stop: day2 }];
+    const result = await runAdAccountSync(
+      { db, meta: fakeMeta([AD_1, AD_2], rows) },
+      account,
+      DATE,
+      day2
+    );
+    expect(result.conflict).toBeFalsy();
+    if (result.conflict) return;
+    expect(result.rowsUpserted).toBe(2);
+
+    const { data: run } = await db
+      .from("ad_sync_runs")
+      .select("date_from, date_to")
+      .eq("id", result.runId)
+      .single();
+    expect(run?.date_from).toBe(DATE);
+    expect(run?.date_to).toBe(day2);
+
+    await db.from("ad_insights_daily").delete().eq("date_start", day2).eq("client_id", account.client_id);
+  });
+
+  it("marks ads absent from Meta's listing inactive, retaining the row", async () => {
+    await runAdAccountSync({ db, meta: fakeMeta([AD_1, AD_2], []) }, account, DATE, DATE);
+    await runAdAccountSync({ db, meta: fakeMeta([AD_1], []) }, account, DATE, DATE);
+
+    const { data: gone } = await db.from("ads").select("status, ad_name").eq("meta_ad_id", "test_sync_ad_2").single();
+    expect(gone?.status).toBe("inactive");
+    expect(gone?.ad_name).toBe("Test Sync Ad Two"); // history retained
+
+    const { data: kept } = await db.from("ads").select("status").eq("meta_ad_id", "test_sync_ad_1").single();
+    expect(kept?.status).toBe("active");
+  });
+
   it("is idempotent: the same window twice yields no duplicates and unchanged totals", async () => {
     const meta = fakeMeta([AD_1, AD_2], [insightRow("test_sync_ad_1", "12.34")]);
-    await runAdAccountSync({ db, meta }, account, DATE);
-    await runAdAccountSync({ db, meta }, account, DATE);
+    await runAdAccountSync({ db, meta }, account, DATE, DATE);
+    await runAdAccountSync({ db, meta }, account, DATE, DATE);
 
     const { data: facts } = await db
       .from("ad_insights_daily")
@@ -170,6 +207,7 @@ describe("runAdAccountSync", () => {
         ),
       },
       account,
+      DATE,
       DATE
     );
 
@@ -186,7 +224,7 @@ describe("runAdAccountSync", () => {
         throw new Error("insights exploded");
       },
     };
-    await expect(runAdAccountSync({ db, meta }, account, DATE)).rejects.toThrow("insights exploded");
+    await expect(runAdAccountSync({ db, meta }, account, DATE, DATE)).rejects.toThrow("insights exploded");
 
     const { data: run } = await db
       .from("ad_sync_runs")
@@ -209,6 +247,7 @@ describe("runAdAccountSync", () => {
     const result = await runAdAccountSync(
       { db, meta: fakeMeta([], []) },
       account,
+      DATE,
       DATE
     );
     expect(result.conflict).toBe(true);

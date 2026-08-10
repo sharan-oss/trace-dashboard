@@ -53,7 +53,8 @@ function usableAd(ad: MetaAd): ad is MetaAd & {
 export async function runAdAccountSync(
   deps: SyncDeps,
   account: SyncAccount,
-  date: string,
+  dateFrom: string,
+  dateTo: string,
   kind: "manual" | "nightly" | "backfill" = "manual"
 ): Promise<SyncResult> {
   const { db, meta } = deps;
@@ -79,8 +80,8 @@ export async function runAdAccountSync(
       ad_account_id: account.id,
       kind,
       status: "running",
-      date_from: date,
-      date_to: date,
+      date_from: dateFrom,
+      date_to: dateTo,
     })
     .select("id")
     .single();
@@ -114,6 +115,18 @@ export async function runAdAccountSync(
         { onConflict: "meta_ad_id" }
       );
       if (error) throw new Error(`ads upsert failed: ${error.message}`);
+
+      // Lifecycle (AC-12): anything of this account Meta no longer lists —
+      // stamp is older than this run, or the row was seeded and never synced —
+      // goes inactive. Never deleted: names keep resolving, history is
+      // untouched. Guarded on a non-empty listing so a fluke empty response
+      // can never mass-retire an account.
+      const { error: retireError } = await db
+        .from("ads")
+        .update({ status: "inactive" })
+        .eq("ad_account_id", account.id)
+        .or(`last_synced_at.lt.${now},last_synced_at.is.null`);
+      if (retireError) throw new Error(`inactive marking failed: ${retireError.message}`);
     }
 
     // 2. Resolve meta_ad_id → ads.id for the insights foreign key.
@@ -128,7 +141,7 @@ export async function runAdAccountSync(
     //    account's own timezone; every mapped account is Asia/Kolkata (the
     //    POST /accounts INR guard keeps it that way), so date_start is already
     //    the IST day and is stored as-is.
-    const insights = await meta.getAdInsights(account.meta_ad_account_id, date);
+    const insights = await meta.getAdInsights(account.meta_ad_account_id, dateFrom, dateTo);
     let skipped = 0;
     const factRows = [];
     for (const row of insights) {

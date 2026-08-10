@@ -184,14 +184,15 @@ describe("createMetaClient — rate limiting and backoff", () => {
 });
 
 describe("createMetaClient — insights", () => {
-  it("requests one row per ad per day", async () => {
+  it("requests one row per ad per day across the given range", async () => {
     const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ data: [] }));
     const { client } = makeClient(fetchImpl as unknown as typeof fetch);
-    await client.getAdInsights("act_123", "2026-08-01");
+    await client.getAdInsights("act_123", "2026-08-01", "2026-08-03");
 
     const url = String(fetchImpl.mock.calls[0][0]);
     expect(url).toContain("level=ad");
     expect(url).toContain("time_increment=1");
     expect(url).toContain("2026-08-01");
+    expect(url).toContain("2026-08-03");
   });
 });

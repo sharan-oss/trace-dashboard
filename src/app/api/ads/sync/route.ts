@@ -65,6 +65,7 @@ export async function POST(request: Request): Promise<Response> {
     const result = await runAdAccountSync(
       { db, meta, apiCallCount: () => apiCalls },
       account,
+      date,
       date
     );
     if (result.conflict) {

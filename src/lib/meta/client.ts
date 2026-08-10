@@ -50,6 +50,9 @@ export type MetaClientOptions = {
   /** When set, every call carries appsecret_proof (HMAC-SHA256 of the token),
    * so a leaked token is useless without the app secret. */
   appSecret?: string;
+  /** Called once per HTTP request (including pagination and retries) — the
+   * sync uses it to record api_calls on the run log. */
+  onRequest?: (url: string) => void;
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
 };
@@ -96,6 +99,7 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
     : undefined;
 
   async function requestOnce(url: string): Promise<{ body: unknown; response: Response }> {
+    options.onRequest?.(url);
     const response = await doFetch(url, {
       headers: { Authorization: `Bearer ${token}` },
     });

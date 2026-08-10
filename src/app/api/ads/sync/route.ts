@@ -1,22 +1,70 @@
 /**
- * POST /api/ads/sync — sync one mapped ad account for one IST day.
+ * /api/ads/sync — the sync trigger surface.
  *
- * Authenticated by the CRON_SECRET bearer header (Vercel Cron) or an admin
- * identity. 409 when a run is already in progress for the account. The nightly
- * multi-day rolling window arrives with Slice C; this endpoint is the unit it
- * will be built from.
+ * GET  — nightly orchestrator (this is what Vercel Cron invokes, with the
+ *        CRON_SECRET bearer attached): every active account, trailing 28-day
+ *        IST window, capped thumbnail mirroring, one run row per account,
+ *        failures isolated per account.
+ * POST — manual targeted sync: one account, an explicit day or range.
+ *
+ * Both authenticated by CRON_SECRET or an admin identity. 409 when a run is
+ * already in progress for the targeted account.
  */
 import { z } from "zod";
 import { requireCronOrAdmin } from "@/lib/auth/api-guard";
 import { createSyncClient } from "@/lib/auth/service-identity";
-import { createMetaClient } from "@/lib/meta/client";
+import { createMetaClient, type MetaClient } from "@/lib/meta/client";
 import { getMetaConfig } from "@/lib/meta/env";
+import {
+  NIGHTLY_THUMBNAIL_CAP,
+  loadActiveAccounts,
+  runNightlyForAccounts,
+} from "@/lib/meta/nightly";
 import { runAdAccountSync } from "@/lib/meta/sync";
 
-const Body = z.object({
-  meta_ad_account_id: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"),
-});
+function buildMetaClient(onRequest: () => void): MetaClient {
+  const config = getMetaConfig();
+  return createMetaClient({
+    token: config.token,
+    apiVersion: config.apiVersion,
+    appSecret: config.appSecret,
+    onRequest,
+  });
+}
+
+export async function GET(request: Request): Promise<Response> {
+  const denied = await requireCronOrAdmin(request);
+  if (denied) return denied;
+
+  const db = await createSyncClient();
+  let apiCalls = 0;
+  const meta = buildMetaClient(() => {
+    apiCalls += 1;
+  });
+
+  const accounts = await loadActiveAccounts(db);
+  const outcomes = await runNightlyForAccounts(
+    { db, meta, apiCallCount: () => apiCalls, thumbnails: { limit: NIGHTLY_THUMBNAIL_CAP } },
+    accounts
+  );
+  const failed = outcomes.filter((o) => o.outcome === "failed").length;
+  return Response.json(
+    { accounts: outcomes.length, failed, outcomes },
+    { status: failed === outcomes.length && outcomes.length > 0 ? 502 : 200 }
+  );
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const Body = z
+  .object({
+    meta_ad_account_id: z.string().min(1),
+    date: z.string().regex(DAY).optional(),
+    date_from: z.string().regex(DAY).optional(),
+    date_to: z.string().regex(DAY).optional(),
+  })
+  .refine((b) => (b.date ? !b.date_from && !b.date_to : Boolean(b.date_from && b.date_to)), {
+    message: "provide either date, or date_from and date_to",
+  });
 
 export async function POST(request: Request): Promise<Response> {
   const denied = await requireCronOrAdmin(request);
@@ -25,11 +73,13 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = Body.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json(
-      { error: "meta_ad_account_id and date (YYYY-MM-DD) are required" },
+      { error: "meta_ad_account_id plus date, or date_from and date_to (YYYY-MM-DD)" },
       { status: 400 }
     );
   }
-  const { meta_ad_account_id, date } = parsed.data;
+  const { meta_ad_account_id } = parsed.data;
+  const dateFrom = parsed.data.date ?? parsed.data.date_from!;
+  const dateTo = parsed.data.date ?? parsed.data.date_to!;
 
   const db = await createSyncClient();
   const { data: account, error } = await db
@@ -50,23 +100,17 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Account is disconnected" }, { status: 422 });
   }
 
-  const config = getMetaConfig();
   let apiCalls = 0;
-  const meta = createMetaClient({
-    token: config.token,
-    apiVersion: config.apiVersion,
-    appSecret: config.appSecret,
-    onRequest: () => {
-      apiCalls += 1;
-    },
+  const meta = buildMetaClient(() => {
+    apiCalls += 1;
   });
 
   try {
     const result = await runAdAccountSync(
-      { db, meta, apiCallCount: () => apiCalls },
+      { db, meta, apiCallCount: () => apiCalls, thumbnails: { limit: NIGHTLY_THUMBNAIL_CAP } },
       account,
-      date,
-      date
+      dateFrom,
+      dateTo
     );
     if (result.conflict) {
       return Response.json(

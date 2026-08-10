@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import {
   IndianRupee,
+  Megaphone,
   MousePointerClick,
+  Percent,
   TrendingUp,
   Users,
 } from "lucide-react";
@@ -14,8 +16,12 @@ import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { formatCount, formatINR, formatPercent } from "@/lib/format";
 import {
   CONVERSION_RATE_LABEL,
+  CPA_LABEL,
+  META_SPEND_LABEL,
   conversionRate,
+  cpa,
 } from "@/lib/metrics/definitions";
+import { getAdsSummary, getSpendDaily } from "@/lib/queries/ads";
 import {
   fillDailyGaps,
   getClients,
@@ -61,15 +67,31 @@ export default async function OverviewPage({
     );
   }
 
-  const [kpis, daily, ads] = await Promise.all([
+  const [kpis, daily, ads, adsSummary, spendDaily] = await Promise.all([
     getOverviewKpis(supabase, selected.id, preset),
     getRevenueDaily(supabase, selected.id, preset),
     getTopAds(supabase, selected.id, preset),
+    getAdsSummary(supabase, selected.id, preset),
+    getSpendDaily(supabase, selected.id, preset),
   ]);
+  const cpaValue = cpa(adsSummary.spend_paise, kpis.l1_paid_count);
 
   const today = istToday();
-  const fromDay = rangeStartDay(preset, today) ?? daily[0]?.day ?? today;
-  const chartData = fillDailyGaps(daily, fromDay, today);
+  const fromDay =
+    rangeStartDay(preset, today) ?? daily[0]?.day ?? spendDaily[0]?.day ?? today;
+  const spendByDay = new Map(spendDaily.map((r) => [r.day, r]));
+  const chartData = fillDailyGaps(daily, fromDay, today).map((r) => {
+    const s = spendByDay.get(r.day);
+    const spend = s?.spend_paise ?? 0;
+    const paid = s?.l1_paid_count ?? 0;
+    return {
+      ...r,
+      spend_paise: spend,
+      // Null, not zero, when there are no buyers: a zero CPA reads as "free
+      // customers"; the line simply breaks instead.
+      cpa_paise: paid > 0 ? Math.round(spend / paid) : null,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6 p-6 sm:p-8">
@@ -83,10 +105,10 @@ export default async function OverviewPage({
 
       <BentoGrid className="auto-rows-[minmax(120px,auto)]">
         <KpiTile
-          label="Total spend"
-          value="—"
-          caption="Connect Meta to unlock"
-          locked
+          label={META_SPEND_LABEL}
+          value={formatINR(adsSummary.spend_paise)}
+          caption="Reported by Meta — never includes other channels"
+          icon={Megaphone}
         />
         <KpiTile
           label="L1 revenue"
@@ -105,10 +127,14 @@ export default async function OverviewPage({
           hero
         />
         <KpiTile
-          label="CPA"
-          value="—"
-          caption="Connect Meta to unlock"
-          locked
+          label={CPA_LABEL}
+          value={cpaValue == null ? "n/a" : formatINR(Math.round(cpaValue))}
+          caption={
+            cpaValue == null
+              ? "No L1 buyers in range"
+              : "Meta spend per new L1 buyer"
+          }
+          icon={Percent}
         />
         <KpiTile
           label="Sessions"

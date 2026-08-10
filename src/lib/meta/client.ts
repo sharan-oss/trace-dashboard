@@ -200,7 +200,8 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
         endpoint(`${adAccountId}/insights`, {
           level: "ad",
           time_increment: "1",
-          fields: "ad_id,spend,impressions,clicks,reach",
+          fields:
+            "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,impressions,clicks,reach",
           time_range: JSON.stringify({ since, until }),
           limit: "500",
         })

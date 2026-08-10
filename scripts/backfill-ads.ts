@@ -21,7 +21,9 @@ import { config } from "dotenv";
 config({ path: ".env.local", quiet: true });
 
 const BACKFILL_START = "2026-06-27";
-const BASE_URL = process.env.SYNC_BASE_URL ?? "http://localhost:3000";
+// 127.0.0.1, not localhost: Node's fetch resolves localhost to ::1 first,
+// and the Next dev server binds IPv4.
+const BASE_URL = process.env.SYNC_BASE_URL ?? "http://127.0.0.1:3000";
 /** Effectively uncapped — the whole point of running locally. */
 const THUMBNAIL_LIMIT = 100_000;
 

@@ -50,4 +50,11 @@ export type MetaInsightRow = {
   impressions?: string;
   clicks?: string;
   reach?: string;
+  /** Hierarchy names ride along so spend on DELETED ads (unlistable via /ads)
+   * can still synthesize a dimension row instead of being orphaned. */
+  ad_name?: string;
+  adset_id?: string;
+  adset_name?: string;
+  campaign_id?: string;
+  campaign_name?: string;
 };

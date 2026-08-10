@@ -135,19 +135,61 @@ export async function runAdAccountSync(
       if (retireError) throw new Error(`inactive marking failed: ${retireError.message}`);
     }
 
-    // 2. Resolve meta_ad_id → ads.id for the insights foreign key.
-    const { data: dimension, error: dimError } = await db
-      .from("ads")
-      .select("id, meta_ad_id")
-      .eq("client_id", account.client_id);
-    if (dimError) throw new Error(`ads readback failed: ${dimError.message}`);
-    const adIdByMetaId = new Map((dimension ?? []).map((r) => [r.meta_ad_id as string, r.id as string]));
+    // 2. Resolve meta_ad_id → ads.id for the insights foreign key. Paged:
+    //    PostgREST caps un-ranged selects at 1000 rows, and Love School alone
+    //    has more ads than that — an unpaged readback silently orphaned
+    //    insight rows on the first live backfill.
+    const adIdByMetaId = new Map<string, string>();
+    const readDimension = async () => {
+      const PAGE = 1000;
+      for (let offset = 0; ; offset += PAGE) {
+        const { data: page, error: dimError } = await db
+          .from("ads")
+          .select("id, meta_ad_id")
+          .eq("client_id", account.client_id)
+          .order("id")
+          .range(offset, offset + PAGE - 1);
+        if (dimError) throw new Error(`ads readback failed: ${dimError.message}`);
+        for (const r of page ?? []) adIdByMetaId.set(r.meta_ad_id as string, r.id as string);
+        if (!page || page.length < PAGE) break;
+      }
+    };
+    await readDimension();
 
     // 3. Facts: one row per ad for the day. Insights come back in the ad
     //    account's own timezone; every mapped account is Asia/Kolkata (the
     //    POST /accounts INR guard keeps it that way), so date_start is already
     //    the IST day and is stored as-is.
     const insights = await meta.getAdInsights(account.meta_ad_account_id, dateFrom, dateTo);
+
+    // 3a. Deleted ads: Meta reports their spend history but refuses to list
+    //     them via /ads (code 100/1815001), so they can never arrive through
+    //     the dimension sync. Synthesize inactive dimension rows from the
+    //     insight rows' own hierarchy fields — spend is never orphaned.
+    const unknown = insights.filter(
+      (row) => !adIdByMetaId.has(row.ad_id) && row.ad_name && row.adset_id && row.campaign_id
+    );
+    if (unknown.length > 0) {
+      const stubByAdId = new Map(unknown.map((row) => [row.ad_id, row]));
+      const { error: stubError } = await db.from("ads").upsert(
+        [...stubByAdId.values()].map((row) => ({
+          client_id: account.client_id,
+          ad_account_id: account.id,
+          meta_ad_id: row.ad_id,
+          meta_adset_id: row.adset_id!,
+          meta_campaign_id: row.campaign_id!,
+          ad_name: row.ad_name!,
+          adset_name: row.adset_name ?? row.adset_id!,
+          campaign_name: row.campaign_name ?? row.campaign_id!,
+          status: "inactive",
+          last_synced_at: now,
+        })),
+        { onConflict: "meta_ad_id" }
+      );
+      if (stubError) throw new Error(`deleted-ad stub upsert failed: ${stubError.message}`);
+      await readDimension();
+    }
+
     let skipped = 0;
     const factRows = [];
     for (const row of insights) {

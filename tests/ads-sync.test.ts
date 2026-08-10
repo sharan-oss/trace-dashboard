@@ -217,6 +217,39 @@ describe("runAdAccountSync", () => {
     expect(result.skippedInsightRows).toBe(1);
   });
 
+  it("synthesizes an inactive dimension stub for spend on a deleted ad", async () => {
+    // Deleted ads are unlistable via /ads but their spend history is real —
+    // the insight row's own hierarchy fields become the dimension row.
+    const deletedAdRow = {
+      ...insightRow("test_sync_ad_deleted", "7.00"),
+      ad_name: "Deleted Ad",
+      adset_id: "test_sync_adset_del",
+      adset_name: "Deleted Adset",
+      campaign_id: "test_sync_campaign_del",
+      campaign_name: "Deleted Campaign",
+    };
+    const result = await runAdAccountSync(
+      { db, meta: fakeMeta([AD_1], [deletedAdRow]) },
+      account,
+      DATE,
+      DATE
+    );
+
+    expect(result.conflict).toBeFalsy();
+    if (result.conflict) return;
+    expect(result.status).toBe("success");
+    expect(result.skippedInsightRows).toBe(0);
+    expect(result.rowsUpserted).toBe(1);
+
+    const { data: stub } = await db
+      .from("ads")
+      .select("status, ad_name, campaign_name")
+      .eq("meta_ad_id", "test_sync_ad_deleted")
+      .single();
+    expect(stub?.status).toBe("inactive");
+    expect(stub?.ad_name).toBe("Deleted Ad");
+  });
+
   it("leaves a failed run row when Meta errors mid-run", async () => {
     const meta = {
       listAds: async () => [AD_1],

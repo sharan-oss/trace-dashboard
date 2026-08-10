@@ -179,11 +179,12 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
           fields:
             "id,name,adset{id,name},campaign{id,name},status,effective_status,creative{id,thumbnail_url,image_url,image_hash}",
           // Include paused and archived ads, so a historical name match still
-          // resolves after an ad is retired.
+          // resolves after an ad is retired. DELETED is deliberately absent:
+          // Meta refuses it on this edge (code 100 subcode 1815001, "Cannot
+          // request deleted objects" — hit live 2026-08-10).
           effective_status: JSON.stringify([
             "ACTIVE",
             "PAUSED",
-            "DELETED",
             "ARCHIVED",
             "CAMPAIGN_PAUSED",
             "ADSET_PAUSED",

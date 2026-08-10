@@ -144,9 +144,7 @@ export default function LandingPage() {
           <span className="lp-display block text-lg font-bold tracking-tight text-(--lp-ink)">
             Trace
           </span>
-          <span className="text-sm text-(--lp-muted)">
-            Payment-level ad attribution for course businesses
-          </span>
+          <span className="text-sm text-(--lp-muted)">Every sale. Traced.</span>
         </div>
         <div className="flex items-center gap-6 text-sm">
           <a

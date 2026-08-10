@@ -101,7 +101,7 @@ No time/waiting language anywhere in this section (Sharan: "30-day waiting is a 
 
 ## Section 9 — Footer
 
-Minimal: logo + one-liner "Payment-level ad attribution for course businesses" + Request Access link + contact email + ©. No nav sprawl.
+Minimal: logo + tagline **"Every sale. Traced."** (locked 2026-08-10; replaces "Payment-level ad attribution for course businesses") + Request Access link + © — contact email dropped at review. Reserve line for social cards / meta description: "Clicks lie. Payments don't."
 
 ## Copy claims audit (all true as of approval)
 

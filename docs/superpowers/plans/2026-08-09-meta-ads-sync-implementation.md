@@ -10,6 +10,17 @@
 
 Design decisions, the App Review finding, and the connection-model discussion: `~/.claude-work/plans/goofy-foraging-stream.md` (approved 2026-08-09). Source spec: `docs/superpowers/specs/2026-08-09-meta-ads-attribution/02-meta-ads-sync.md`.
 
+## 2026-08-10 refresh — deltas applied at execution time
+
+The plan below is executed as written EXCEPT for these corrections, all evidenced by the live access probe (`scripts/meta-access-probe.ts`, 5/5 green on 2026-08-10) and the collisions recorded in `docs/STATUS.md`:
+
+1. **`sync_runs` is renamed `ad_sync_runs` everywhere** — the literal name `sync_runs` was taken by the Razorpay L2 sync log on 2026-08-10; the two logs have different shapes and must not merge.
+2. **Migration file is `20260810130000_ads_sync_tables.sql`** — the plan's `20260810100000` timestamp was taken by the shipped overview RPCs.
+3. **API version pin is `v26.0`** (released 2026-07-29), not `v25.0`.
+4. **Account discovery is `GET /me/assigned_ad_accounts`** (with `business{id,name}` per account), not `/{business_id}/owned_ad_accounts` + `/client_ad_accounts` — proven live: system-user tokens get "(#100) nonexisting field" on business edges. `META_BUSINESS_ID` is therefore optional and `listAdAccounts()` takes no argument.
+5. **The client sends `appsecret_proof`** (HMAC-SHA256 of the token keyed by `META_APP_SECRET`) on every call, matching the probe — a leaked token is useless without the app secret.
+6. **Task 5 is UNBLOCKED** — no App Review, no Business Verification. The working System User token (`tracesync` under BM "Alttred Miinds", app "Trace Dashboard" 1882760986033502, `ads_read` Standard Access, `development_access` tier) reads Love School's two client-owned accounts (`act_1052790390047154`, `act_1312705356631852`). Task 2's auth user is created via the Supabase management connection at execution time rather than as a manual Sharan step.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.

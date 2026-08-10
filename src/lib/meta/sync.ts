@@ -14,6 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MetaClient } from "@/lib/meta/client";
 import { toMinorUnits } from "@/lib/meta/money";
+import { mirrorThumbnails } from "@/lib/meta/thumbnails";
 import type { MetaAd } from "@/lib/meta/types";
 
 export type SyncAccount = {
@@ -33,6 +34,8 @@ export type SyncResult =
       adsSynced: number;
       rowsUpserted: number;
       skippedInsightRows: number;
+      thumbnailsMirrored: number;
+      thumbnailsFailed: number;
       apiCalls: number;
     };
 
@@ -41,6 +44,9 @@ export type SyncDeps = {
   meta: Pick<MetaClient, "listAds" | "getAdInsights">;
   /** Reads the running HTTP-request count (wired to the client's onRequest). */
   apiCallCount?: () => number;
+  /** When set, mirror creative thumbnails as part of the run (AC-11). Omit to
+   * skip — e.g. unit tests that only exercise the spend path. */
+  thumbnails?: { limit?: number; fetchImpl?: typeof fetch };
 };
 
 function usableAd(ad: MetaAd): ad is MetaAd & {
@@ -170,7 +176,22 @@ export async function runAdAccountSync(
       if (error) throw new Error(`ad_insights_daily upsert failed: ${error.message}`);
     }
 
-    const status = skipped > 0 ? "partial" : "success";
+    // 4. Creative thumbnails (AC-11) — failures degrade, never abort.
+    let thumbs = { mirrored: 0, failed: 0 };
+    if (deps.thumbnails) {
+      thumbs = await mirrorThumbnails({
+        db,
+        accountId: account.id,
+        limit: deps.thumbnails.limit,
+        fetchImpl: deps.thumbnails.fetchImpl,
+      });
+    }
+
+    const problems = [
+      skipped > 0 ? `${skipped} insight rows had no dimension row` : null,
+      thumbs.failed > 0 ? `${thumbs.failed} thumbnails failed to mirror` : null,
+    ].filter(Boolean);
+    const status = problems.length > 0 ? "partial" : "success";
     await db
       .from("ad_sync_runs")
       .update({
@@ -178,7 +199,7 @@ export async function runAdAccountSync(
         ads_synced: usable.length,
         rows_upserted: factRows.length,
         api_calls: apiCalls(),
-        error: skipped > 0 ? `${skipped} insight rows had no dimension row` : null,
+        error: problems.length > 0 ? problems.join("; ") : null,
         finished_at: new Date().toISOString(),
       })
       .eq("id", run.id);
@@ -189,6 +210,8 @@ export async function runAdAccountSync(
       adsSynced: usable.length,
       rowsUpserted: factRows.length,
       skippedInsightRows: skipped,
+      thumbnailsMirrored: thumbs.mirrored,
+      thumbnailsFailed: thumbs.failed,
       apiCalls: apiCalls(),
     };
   } catch (err) {

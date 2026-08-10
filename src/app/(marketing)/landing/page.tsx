@@ -68,7 +68,7 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="relative mx-auto flex w-full max-w-4xl flex-col items-center px-6 pt-16 pb-24 text-center sm:pt-24 sm:pb-32">
         <Rise delay={0}>
-          <h1 className="lp-display text-5xl leading-[1.05] font-bold tracking-tight text-balance text-(--lp-ink) sm:text-6xl lg:text-7xl">
+          <h1 className="lp-display text-[2.8rem] leading-[1.05] font-bold tracking-tight text-balance text-(--lp-ink) sm:text-6xl lg:text-7xl">
             Optimize your ad account for{" "}
             <span className="text-(--lp-positive)">L2 conversions</span> — not{" "}
             <span className="text-(--lp-negative)">cheap leads</span>.

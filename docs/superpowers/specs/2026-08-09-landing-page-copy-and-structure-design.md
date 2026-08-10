@@ -54,7 +54,7 @@ Rule: genuine client quotes, tightened without changing meaning. Attribution = f
 
 ## Section 3 — Dashboard mock
 
-No copy. Full-width **coded** product mock (decided 2026-08-10 — no Gemini image; a coded dark-glass dashboard matches the page and the real product): sidebar nav, KPI row (L2/L1 revenue, sessions, L2 ROAS), indigo L2 revenue chart over slate L1 baseline, top-ads-by-L2 list. Grows 80%→100% width on scroll. Numbers illustrative.
+One framing line above the mock (locked 2026-08-10): **"These could be your numbers, 30 days from now."** — doubles as the honesty device for the mock's illustrative dream-month numbers. Otherwise no copy. Full-width **coded** product mock (decided 2026-08-10 — no Gemini image; a coded dark-glass dashboard matches the page and the real product): sidebar nav, KPI row (L2/L1 revenue, sessions, L2 ROAS), indigo L2 revenue chart over slate L1 baseline, top-ads-by-L2 list. Grows 80%→100% width on scroll. Numbers illustrative.
 
 ## Section 4 — Top 4 features
 

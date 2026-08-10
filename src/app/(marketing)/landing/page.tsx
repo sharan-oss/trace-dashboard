@@ -114,6 +114,9 @@ export default function LandingPage() {
 
       {/* Dashboard mock (coded, no image) — grows 80% → 100% width on scroll */}
       <section className="relative mx-auto w-full max-w-6xl px-6 pb-32">
+        <p className="mb-8 text-center text-base text-(--lp-muted)">
+          These could be your numbers, 30 days from now.
+        </p>
         <ScrollGrow>
           <DashboardMock />
         </ScrollGrow>

@@ -2,23 +2,28 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { rangeToDays, type RangePreset } from "@/lib/range";
 
 /**
- * Ads-section read layer (Slice D). Every aggregate is computed in Postgres by
- * the RPCs in migration 20260810150000 — raw rows are never paged into JS to
- * be summed. RLS is the tenant guarantee; p_client_id is defense-in-depth.
+ * Ads-section read layer. Every aggregate is computed in Postgres by the RPCs
+ * in migrations 20260810150000 + 20260813090000 — raw rows are never paged
+ * into JS to be summed. RLS is the tenant guarantee; p_client_id is
+ * defense-in-depth.
  */
 
-export type AdsTier = "campaign" | "adset" | "ad";
+export type AdsTier = "campaign" | "ad";
 
 export type AdsBreakdownRow = {
   tier: AdsTier;
   /** Null keys are the per-level Unattributed buckets — rendered, never dropped. */
   campaign_key: string | null;
+  /** Present on ad rows only (ad sets are a label, not a tier). */
   adset_key: string | null;
   ad_key: string | null;
   campaign_name: string | null;
   adset_name: string | null;
   ad_name: string | null;
   spend_paise: number;
+  /** Meta-native delivery counts; CTR/CPM are client-side display divisions. */
+  impressions: number;
+  clicks: number;
   l1_revenue_paise: number;
   l1_paid_count: number;
   l2_revenue_paise: number;
@@ -53,12 +58,6 @@ export type AdAccountSyncStatus = {
   last_run_status: string | null;
   /** A run row currently in 'running' state — "sync in progress", distinct from stale. */
   running_now: boolean;
-};
-
-export type AdThumbnail = {
-  meta_ad_id: string;
-  creative_thumbnail_path: string | null;
-  status: string;
 };
 
 async function rpcRows<T>(
@@ -150,28 +149,42 @@ export async function getAdAccountsSyncStatus(
   });
 }
 
+export type AdDimensionRow = {
+  meta_ad_id: string;
+  meta_adset_id: string | null;
+  meta_campaign_id: string | null;
+  ad_name: string | null;
+  adset_name: string | null;
+  campaign_name: string | null;
+  status: string;
+  creative_thumbnail_path: string | null;
+};
+
 /**
- * Thumbnail paths + lifecycle status for a set of ad keys — a keyed dimension
- * read (chunked under PostgREST URL limits), not an aggregation. Signed URLs
- * are minted by the caller server-side.
+ * The full ads dimension for one client — feeds the Ads cards view so
+ * paused/zero-activity ads can appear even when the breakdown has no row for
+ * them in range. Paged past PostgREST's 1000-row cap (the Slice C live bug:
+ * Love School alone has 1,233 ads, so a single read silently truncates).
  */
-export async function getAdThumbnails(
+export async function getAdsDimension(
   supabase: SupabaseClient,
   clientId: string,
-  adKeys: string[],
-): Promise<Map<string, AdThumbnail>> {
-  const out = new Map<string, AdThumbnail>();
-  const CHUNK = 100;
-  for (let i = 0; i < adKeys.length; i += CHUNK) {
-    const chunk = adKeys.slice(i, i + CHUNK);
-    if (chunk.length === 0) continue;
+): Promise<AdDimensionRow[]> {
+  const out: AdDimensionRow[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("ads")
-      .select("meta_ad_id, creative_thumbnail_path, status")
+      .select(
+        "meta_ad_id, meta_adset_id, meta_campaign_id, ad_name, adset_name, campaign_name, status, creative_thumbnail_path",
+      )
       .eq("client_id", clientId)
-      .in("meta_ad_id", chunk);
-    if (error) throw new Error(`ads thumbnail read failed: ${error.message}`);
-    for (const row of data ?? []) out.set(row.meta_ad_id, row as AdThumbnail);
+      .order("meta_ad_id")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`ads dimension read failed: ${error.message}`);
+    out.push(...((data ?? []) as AdDimensionRow[]));
+    if (!data || data.length < PAGE) break;
   }
   return out;
 }
+

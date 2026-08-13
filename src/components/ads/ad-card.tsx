@@ -1,0 +1,176 @@
+import { ImageOff } from "lucide-react";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { formatCount, formatINR, formatPercent } from "@/lib/format";
+import { cpa, cpm, ctr, roas } from "@/lib/metrics/definitions";
+
+/**
+ * One Meta ad as a creative card: thumbnail, identity (name, ad-set chip,
+ * status), and the decision metrics. Spend + ROAS lead; L1/L2/CPA carry the
+ * money detail; CTR/CPM are Meta-native delivery health. Ratio values render
+ * "n/a" on a zero denominator — never a zero that reads as data.
+ */
+
+export type AdCardData = {
+  adKey: string;
+  adName: string | null;
+  adsetKey: string | null;
+  adsetName: string | null;
+  campaignKey: string | null;
+  campaignName: string | null;
+  /** Meta effective_status, lowercased ("active", "paused", "campaign_paused", …). */
+  status: string;
+  thumbnailUrl: string | null;
+  spendPaise: number;
+  impressions: number;
+  clicks: number;
+  l1RevenuePaise: number;
+  l1PaidCount: number;
+  l2RevenuePaise: number;
+  l2Count: number;
+  nameMatched: boolean;
+  hasTest: boolean;
+  /** Appeared in the breakdown for this range (spend, revenue or sessions). */
+  hasActivity: boolean;
+};
+
+/** Collapse Meta's status zoo into the three states a buyer acts on. */
+export function statusGroup(status: string): "active" | "paused" | "inactive" {
+  if (status === "active") return "active";
+  if (status.endsWith("paused")) return "paused";
+  return "inactive";
+}
+
+function NotApplicable() {
+  return (
+    <span className="text-slate-600" title="Not applicable — no data to compute this from">
+      n/a
+    </span>
+  );
+}
+
+function Metric({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium tracking-wide text-slate-500 uppercase">
+        {label}
+      </div>
+      <div className="mt-0.5 text-xs text-slate-300 tabular-nums">{children}</div>
+    </div>
+  );
+}
+
+export function AdCard({ ad }: { ad: AdCardData }) {
+  const totalRevenue = ad.l1RevenuePaise + ad.l2RevenuePaise;
+  const roasValue = roas(totalRevenue, ad.spendPaise);
+  const cpaValue = cpa(ad.spendPaise, ad.l1PaidCount);
+  const ctrValue = ctr(ad.clicks, ad.impressions);
+  const cpmValue = cpm(ad.spendPaise, ad.impressions);
+  const group = statusGroup(ad.status);
+  const name = ad.adName ?? ad.adKey;
+
+  return (
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md">
+      {ad.thumbnailUrl != null ? (
+        // Signed URL from the private bucket — plain img, remote next/image is
+        // pointless for a 1h-expiring URL.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={ad.thumbnailUrl}
+          alt=""
+          loading="lazy"
+          className="aspect-square w-full border-b border-white/5 object-cover"
+        />
+      ) : (
+        <div className="flex aspect-square w-full items-center justify-center border-b border-white/5 bg-white/3 text-slate-600">
+          <ImageOff size={24} aria-hidden="true" />
+        </div>
+      )}
+
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <h3
+              className="line-clamp-2 text-sm font-medium text-white"
+              title={name}
+            >
+              {name}
+            </h3>
+            {group === "active" && <StatusBadge status="success" label="Active" />}
+            {group === "paused" && <StatusBadge status="warning" label="Paused" />}
+            {group === "inactive" && (
+              <span className="inline-flex items-center text-xs font-medium text-slate-500">
+                Inactive
+              </span>
+            )}
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {ad.adsetName != null && (
+              <span
+                className="max-w-40 truncate rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400"
+                title={`Ad set: ${ad.adsetName}`}
+              >
+                {ad.adsetName}
+              </span>
+            )}
+            {ad.nameMatched && (
+              <span
+                title="Attributed by ad name, not ad id — names are not unique, so treat as approximate"
+                className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400"
+              >
+                ≈ name
+              </span>
+            )}
+            {ad.hasTest && <StatusBadge status="warning" label="Test" />}
+          </div>
+        </div>
+
+        <div className="mt-auto flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 border-t border-white/5 pt-3">
+            <div>
+              <div className="text-[10px] font-medium tracking-wide text-slate-500 uppercase">
+                Meta spend
+              </div>
+              <div className="mt-0.5 text-base font-semibold text-white tabular-nums">
+                {formatINR(ad.spendPaise)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-medium tracking-wide text-slate-500 uppercase">
+                ROAS (L1+L2)
+              </div>
+              <div className="mt-0.5 text-base font-semibold text-white tabular-nums">
+                {roasValue == null ? <NotApplicable /> : `${roasValue.toFixed(2)}×`}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-x-3 gap-y-2">
+            <Metric label="L1 rev">
+              {formatINR(ad.l1RevenuePaise)}
+              <span className="ml-1 text-slate-500">({formatCount(ad.l1PaidCount)})</span>
+            </Metric>
+            <Metric label="L2 rev">
+              {formatINR(ad.l2RevenuePaise)}
+              <span className="ml-1 text-slate-500">({formatCount(ad.l2Count)})</span>
+            </Metric>
+            <Metric label="CPA (L1)">
+              {cpaValue == null ? <NotApplicable /> : formatINR(Math.round(cpaValue))}
+            </Metric>
+            <Metric label="CTR">
+              {ctrValue == null ? <NotApplicable /> : formatPercent(ctrValue, 2)}
+            </Metric>
+            <Metric label="CPM">
+              {cpmValue == null ? <NotApplicable /> : formatINR(Math.round(cpmValue))}
+            </Metric>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

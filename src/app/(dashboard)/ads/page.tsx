@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   IndianRupee,
   Megaphone,
@@ -7,7 +8,10 @@ import {
   Target,
   TrendingUp,
 } from "lucide-react";
-import { AdsDrilldownTable } from "@/components/ads/ads-drilldown-table";
+import { AdCards } from "@/components/ads/ad-cards";
+import type { AdCardData } from "@/components/ads/ad-card";
+import { AdsTabs, type AdsTab } from "@/components/ads/ads-tabs";
+import { CampaignsTable } from "@/components/ads/campaigns-table";
 import { SyncStatusNote } from "@/components/ads/sync-status-note";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { KpiTile } from "@/components/overview/kpi-tile";
@@ -25,9 +29,11 @@ import {
 } from "@/lib/metrics/definitions";
 import {
   getAdAccountsSyncStatus,
-  getAdThumbnails,
   getAdsBreakdown,
+  getAdsDimension,
   getAdsSummary,
+  type AdsBreakdownRow,
+  type AdDimensionRow,
 } from "@/lib/queries/ads";
 import { getClients, getOverviewKpis } from "@/lib/queries/overview";
 import { parseRangeParam } from "@/lib/range";
@@ -37,14 +43,116 @@ export const dynamic = "force-dynamic";
 
 const CREATIVES_BUCKET = "ad-creatives";
 const SIGNED_URL_TTL_S = 3600;
+const SIGN_CHUNK = 200;
+
+function first(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+/** Signed URLs for every dimension thumbnail, chunked under API limits. */
+async function signThumbnails(
+  supabase: SupabaseClient,
+  dimension: AdDimensionRow[],
+): Promise<Map<string, string>> {
+  const withPath = dimension.filter((d) => d.creative_thumbnail_path != null);
+  const out = new Map<string, string>();
+  for (let i = 0; i < withPath.length; i += SIGN_CHUNK) {
+    const chunk = withPath.slice(i, i + SIGN_CHUNK);
+    const { data: signed } = await supabase.storage
+      .from(CREATIVES_BUCKET)
+      .createSignedUrls(
+        chunk.map((d) => d.creative_thumbnail_path as string),
+        SIGNED_URL_TTL_S,
+      );
+    const byPath = new Map(
+      (signed ?? [])
+        .filter((s) => s.signedUrl != null && s.error == null)
+        .map((s) => [s.path, s.signedUrl]),
+    );
+    for (const d of chunk) {
+      const url = byPath.get(d.creative_thumbnail_path as string);
+      if (url != null) out.set(d.meta_ad_id, url);
+    }
+  }
+  return out;
+}
+
+/**
+ * One card per ad: the dimension provides identity (every ad, including
+ * paused/zero-activity ones), the breakdown provides in-range numbers. A
+ * breakdown ad the dimension somehow lacks still gets a card — data is never
+ * silently dropped.
+ */
+function mergeCards(
+  dimension: AdDimensionRow[],
+  breakdown: AdsBreakdownRow[],
+  thumbnails: Map<string, string>,
+): AdCardData[] {
+  const adRows = breakdown.filter((r) => r.tier === "ad" && r.ad_key != null);
+  const byKey = new Map(adRows.map((r) => [r.ad_key as string, r]));
+  const cards: AdCardData[] = dimension.map((d) => {
+    const b = byKey.get(d.meta_ad_id);
+    return {
+      adKey: d.meta_ad_id,
+      adName: d.ad_name ?? b?.ad_name ?? null,
+      adsetKey: d.meta_adset_id ?? b?.adset_key ?? null,
+      adsetName: d.adset_name ?? b?.adset_name ?? null,
+      campaignKey: d.meta_campaign_id ?? b?.campaign_key ?? null,
+      campaignName: d.campaign_name ?? b?.campaign_name ?? null,
+      status: d.status,
+      thumbnailUrl: thumbnails.get(d.meta_ad_id) ?? null,
+      spendPaise: b?.spend_paise ?? 0,
+      impressions: b?.impressions ?? 0,
+      clicks: b?.clicks ?? 0,
+      l1RevenuePaise: b?.l1_revenue_paise ?? 0,
+      l1PaidCount: b?.l1_paid_count ?? 0,
+      l2RevenuePaise: b?.l2_revenue_paise ?? 0,
+      l2Count: b?.l2_count ?? 0,
+      nameMatched: b?.name_matched ?? false,
+      hasTest: b?.has_test ?? false,
+      hasActivity: b != null,
+    };
+  });
+  const dimKeys = new Set(dimension.map((d) => d.meta_ad_id));
+  for (const b of adRows) {
+    if (dimKeys.has(b.ad_key as string)) continue;
+    cards.push({
+      adKey: b.ad_key as string,
+      adName: b.ad_name,
+      adsetKey: b.adset_key,
+      adsetName: b.adset_name,
+      campaignKey: b.campaign_key,
+      campaignName: b.campaign_name,
+      status: "unknown",
+      thumbnailUrl: null,
+      spendPaise: b.spend_paise,
+      impressions: b.impressions,
+      clicks: b.clicks,
+      l1RevenuePaise: b.l1_revenue_paise,
+      l1PaidCount: b.l1_paid_count,
+      l2RevenuePaise: b.l2_revenue_paise,
+      l2Count: b.l2_count,
+      nameMatched: b.name_matched,
+      hasTest: b.has_test,
+      hasActivity: true,
+    });
+  }
+  return cards;
+}
 
 export default async function AdsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string | string[] }>;
+  searchParams: Promise<{
+    range?: string | string[];
+    tab?: string | string[];
+    campaign?: string | string[];
+  }>;
 }) {
-  const { range } = await searchParams;
-  const preset = parseRangeParam(range);
+  const params = await searchParams;
+  const preset = parseRangeParam(params.range);
+  const tab: AdsTab = first(params.tab) === "ads" ? "ads" : "campaigns";
+  const campaignParam = first(params.campaign) || null;
 
   const supabase = await createServerClient();
   const clients = await getClients(supabase);
@@ -96,44 +204,103 @@ export default async function AdsPage({
     );
   }
 
-  const [summary, breakdown, kpis] = await Promise.all([
+  const [summary, breakdown] = await Promise.all([
     getAdsSummary(supabase, selected.id, preset),
     getAdsBreakdown(supabase, selected.id, preset),
-    getOverviewKpis(supabase, selected.id, preset),
   ]);
 
-  // Signed thumbnail URLs for the ad rows — minted server-side from the
-  // private bucket, so tenant scoping travels with the URL's expiry.
-  const adKeys = breakdown
-    .filter((r) => r.tier === "ad" && r.ad_key != null)
-    .map((r) => r.ad_key as string);
-  const thumbs = await getAdThumbnails(supabase, selected.id, adKeys);
-  const paths = [...thumbs.values()]
-    .map((t) => t.creative_thumbnail_path)
-    .filter((p): p is string => p != null);
-  const thumbnailUrls: Record<string, string> = {};
-  if (paths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from(CREATIVES_BUCKET)
-      .createSignedUrls(paths, SIGNED_URL_TTL_S);
-    const byPath = new Map(
-      (signed ?? [])
-        .filter((s) => s.signedUrl != null && s.error == null)
-        .map((s) => [s.path, s.signedUrl]),
+  let view: React.ReactNode;
+  if (tab === "campaigns") {
+    const kpis = await getOverviewKpis(supabase, selected.id, preset);
+    const totalRevenue = kpis.l1_revenue_paise + kpis.l2_revenue_paise;
+    const roasValue = roas(totalRevenue, summary.spend_paise);
+    const cpaValue = cpa(summary.spend_paise, kpis.l1_paid_count);
+    const conv = conversionRate(kpis.l1_paid_count, kpis.sessions_count);
+    view = (
+      <>
+        <BentoGrid className="auto-rows-[minmax(120px,auto)]">
+          <KpiTile
+            label={META_SPEND_LABEL}
+            value={formatINR(summary.spend_paise)}
+            caption="Reported by Meta — never includes other channels"
+            icon={Megaphone}
+          />
+          <KpiTile
+            label="L1 revenue"
+            value={formatINR(kpis.l1_revenue_paise)}
+            valueSuffix={`(${formatCount(kpis.l1_paid_count)})`}
+            caption="Paid front-end transactions"
+            icon={IndianRupee}
+            hero
+          />
+          <KpiTile
+            label="L2 revenue"
+            value={formatINR(kpis.l2_revenue_paise)}
+            valueSuffix={`(${formatCount(kpis.l2_count)})`}
+            caption="Credited to the acquiring ad"
+            icon={TrendingUp}
+            hero
+          />
+          <KpiTile
+            label={ROAS_LABEL}
+            value={roasValue == null ? "n/a" : `${roasValue.toFixed(2)}×`}
+            caption={
+              roasValue == null
+                ? "No Meta spend in range"
+                : "Full customer value ÷ Meta spend"
+            }
+            icon={Target}
+          />
+          <KpiTile
+            label={CPA_LABEL}
+            value={cpaValue == null ? "n/a" : formatINR(Math.round(cpaValue))}
+            caption={
+              cpaValue == null ? "No L1 buyers in range" : "Meta spend per new L1 buyer"
+            }
+            icon={Percent}
+          />
+          <KpiTile
+            label={CONVERSION_RATE_LABEL}
+            value={formatPercent(conv)}
+            caption="Sessions → paid"
+            icon={MousePointerClick}
+          />
+        </BentoGrid>
+        <CampaignsTable
+          rows={breakdown}
+          range={preset}
+          spendUntrackedPaise={summary.spend_untracked_paise}
+          unattributedL1RevenuePaise={summary.unattributed_l1_revenue_paise}
+          unattributedL1Count={summary.unattributed_l1_count}
+        />
+      </>
     );
-    for (const [metaAdId, t] of thumbs) {
-      const url =
-        t.creative_thumbnail_path != null
-          ? byPath.get(t.creative_thumbnail_path)
-          : undefined;
-      if (url != null) thumbnailUrls[metaAdId] = url;
+  } else {
+    const dimension = await getAdsDimension(supabase, selected.id);
+    const thumbnails = await signThumbnails(supabase, dimension);
+    const cards = mergeCards(dimension, breakdown, thumbnails);
+    const campaignNames = new Map<string, string>();
+    for (const c of cards) {
+      if (c.campaignKey != null && !campaignNames.has(c.campaignKey)) {
+        campaignNames.set(c.campaignKey, c.campaignName ?? c.campaignKey);
+      }
     }
+    // Unattributed campaign-tier rows never appear here: their revenue has no
+    // ads to card, so the banner inside AdCards carries it instead.
+    const campaigns = [...campaignNames.entries()]
+      .map(([key, name]) => ({ key, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    view = (
+      <AdCards
+        ads={cards}
+        campaigns={campaigns}
+        activeCampaign={campaignParam}
+        spendUntrackedPaise={summary.spend_untracked_paise}
+        unattributedL1RevenuePaise={summary.unattributed_l1_revenue_paise}
+        unattributedL1Count={summary.unattributed_l1_count}
+      />
+    );
   }
-
-  const totalRevenue = kpis.l1_revenue_paise + kpis.l2_revenue_paise;
-  const roasValue = roas(totalRevenue, summary.spend_paise);
-  const cpaValue = cpa(summary.spend_paise, kpis.l1_paid_count);
-  const conv = conversionRate(kpis.l1_paid_count, kpis.sessions_count);
 
   return (
     <div className="flex flex-col gap-6 p-6 sm:p-8">
@@ -147,62 +314,9 @@ export default async function AdsPage({
 
       <SyncStatusNote accounts={accounts} />
 
-      <BentoGrid className="auto-rows-[minmax(120px,auto)]">
-        <KpiTile
-          label={META_SPEND_LABEL}
-          value={formatINR(summary.spend_paise)}
-          caption="Reported by Meta — never includes other channels"
-          icon={Megaphone}
-        />
-        <KpiTile
-          label="L1 revenue"
-          value={formatINR(kpis.l1_revenue_paise)}
-          valueSuffix={`(${formatCount(kpis.l1_paid_count)})`}
-          caption="Paid front-end transactions"
-          icon={IndianRupee}
-          hero
-        />
-        <KpiTile
-          label="L2 revenue"
-          value={formatINR(kpis.l2_revenue_paise)}
-          valueSuffix={`(${formatCount(kpis.l2_count)})`}
-          caption="Credited to the acquiring ad"
-          icon={TrendingUp}
-          hero
-        />
-        <KpiTile
-          label={ROAS_LABEL}
-          value={roasValue == null ? "n/a" : `${roasValue.toFixed(2)}×`}
-          caption={
-            roasValue == null
-              ? "No Meta spend in range"
-              : "Full customer value ÷ Meta spend"
-          }
-          icon={Target}
-        />
-        <KpiTile
-          label={CPA_LABEL}
-          value={cpaValue == null ? "n/a" : formatINR(Math.round(cpaValue))}
-          caption={
-            cpaValue == null ? "No L1 buyers in range" : "Meta spend per new L1 buyer"
-          }
-          icon={Percent}
-        />
-        <KpiTile
-          label={CONVERSION_RATE_LABEL}
-          value={formatPercent(conv)}
-          caption="Sessions → paid"
-          icon={MousePointerClick}
-        />
-      </BentoGrid>
+      <AdsTabs active={tab} range={preset} />
 
-      <AdsDrilldownTable
-        rows={breakdown}
-        thumbnailUrls={thumbnailUrls}
-        spendUntrackedPaise={summary.spend_untracked_paise}
-        unattributedL1RevenuePaise={summary.unattributed_l1_revenue_paise}
-        unattributedL1Count={summary.unattributed_l1_count}
-      />
+      {view}
     </div>
   );
 }

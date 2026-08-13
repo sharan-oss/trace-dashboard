@@ -47,7 +47,15 @@ function tierSum(rows: AdsBreakdownRow[], tier: string, field: keyof AdsBreakdow
 }
 
 describe("ads_breakdown — hierarchy invariants", () => {
-  it("spend totals agree across all three tiers and with ads_summary", async () => {
+  it("returns exactly the campaign and ad tiers (ad sets are demoted to labels)", async () => {
+    const admin = await adminClient();
+    const clientId = await loveSchoolId();
+    const rows = await getAdsBreakdown(admin, clientId, "all");
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.tier === "campaign" || r.tier === "ad")).toBe(true);
+  });
+
+  it("spend, impressions and clicks totals agree across both tiers and with ads_summary", async () => {
     await attemptStable(async () => {
       const admin = await adminClient();
       const clientId = await loveSchoolId();
@@ -55,13 +63,15 @@ describe("ads_breakdown — hierarchy invariants", () => {
         getAdsBreakdown(admin, clientId, "all"),
         getAdsSummary(admin, clientId, "all"),
       ]);
-      const campaign = tierSum(rows, "campaign", "spend_paise");
-      const adset = tierSum(rows, "adset", "spend_paise");
+      for (const field of ["spend_paise", "impressions", "clicks"] as const) {
+        expect(tierSum(rows, "campaign", field)).toBe(tierSum(rows, "ad", field));
+      }
       const ad = tierSum(rows, "ad", "spend_paise");
-      expect(campaign).toBe(ad);
-      expect(adset).toBe(ad);
       expect(summary.spend_paise).toBe(ad);
       expect(ad).toBeGreaterThan(0); // the backfill is live
+      expect(rows.every((r) => r.impressions >= 0 && r.clicks >= 0)).toBe(true);
+      // Meta has been delivering these ads, so the synced engagement must exist.
+      expect(tierSum(rows, "ad", "impressions")).toBeGreaterThan(0);
     });
   });
 
@@ -95,7 +105,7 @@ describe("ads_breakdown — hierarchy invariants", () => {
         getAdsBreakdown(admin, clientId, "all"),
         getOverviewKpis(admin, clientId, "all"),
       ]);
-      for (const tier of ["campaign", "adset", "ad"]) {
+      for (const tier of ["campaign", "ad"]) {
         expect(tierSum(rows, tier, "l1_revenue_paise")).toBe(kpis.l1_revenue_paise);
         expect(tierSum(rows, tier, "l2_revenue_paise")).toBe(kpis.l2_revenue_paise);
         expect(tierSum(rows, tier, "sessions_count")).toBe(kpis.sessions_count);

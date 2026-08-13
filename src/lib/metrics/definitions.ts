@@ -51,3 +51,22 @@ export function roas(totalRevenuePaise: number, spendPaise: number): number | nu
 export function cpa(spendPaise: number, l1PaidCount: number): number | null {
   return ratio(spendPaise, l1PaidCount);
 }
+
+/**
+ * The Meta-native delivery ratios (2026-08-13 Ads restructure). Both divide
+ * Meta's own synced counts — no attribution logic touches them, so they are
+ * exact by construction and safe at any grouping level.
+ */
+export const CTR_LABEL = "CTR";
+export const CPM_LABEL = "CPM";
+
+/** Clicks ÷ impressions, in 0..1. Null when there are no impressions. */
+export function ctr(clicks: number, impressions: number): number | null {
+  return ratio(clicks, impressions);
+}
+
+/** Meta spend per 1,000 impressions, in paise. Null when there are no impressions. */
+export function cpm(spendPaise: number, impressions: number): number | null {
+  const perImpression = ratio(spendPaise, impressions);
+  return perImpression === null ? null : perImpression * 1000;
+}

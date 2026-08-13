@@ -186,7 +186,10 @@ describe(`${VIEW} — three-tier attribution`, () => {
     }
   });
 
-  it("prefers the stored id over extraction", async () => {
+  it("prefers a VALID stored id over extraction; garbage stored ids are guarded out", async () => {
+    // Same guard as v_sessions_attributed (migration 20260813091000): stored
+    // ids pass through metric_normalize_ad_id, so unexpanded '{{ad.id}}'
+    // macros and '_removed_' never surface as ad_key.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
@@ -195,9 +198,14 @@ describe(`${VIEW} — three-tier attribution`, () => {
       .limit(1000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
-    for (const row of data!) {
+    const valid = data!.filter((r) => /^[0-9]{6,}$/.test(r.ad_id));
+    expect(valid.length).toBeGreaterThan(0); // the backfill guarantees these exist
+    for (const row of valid) {
       expect(row.ad_key).toBe(row.ad_id);
       expect(row.ad_key_type).toBe("ad_id");
+    }
+    for (const row of data!.filter((r) => !/^[0-9]{6,}$/.test(r.ad_id))) {
+      expect(row.ad_key).not.toBe(row.ad_id);
     }
   });
 

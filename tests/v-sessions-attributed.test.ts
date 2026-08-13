@@ -76,7 +76,12 @@ describe(`${VIEW} — key resolution`, () => {
     for (const row of data!) expect(row.ad_key).toMatch(/^[0-9]{6,}$/);
   });
 
-  it("prefers the stored id over extraction — every stored ad_id survives into ad_key", async () => {
+  it("prefers a VALID stored id over extraction; garbage stored ids are guarded out", async () => {
+    // Trace's capture stores raw URL params, and clicks on unexpanded URL
+    // templates deliver literal '{{ad.id}}' macros (live rows since
+    // 2026-08-09, '_removed_' too). The 20260813091000 guard passes stored
+    // ids through metric_normalize_ad_id, so a well-formed stored id must
+    // still win, while a malformed one must never surface as the ad_key.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
@@ -85,9 +90,14 @@ describe(`${VIEW} — key resolution`, () => {
       .limit(2000);
     if (error) throw new Error(error.message);
     expect(data!.length).toBeGreaterThan(0);
-    for (const row of data!) {
+    const valid = data!.filter((r) => /^[0-9]{6,}$/.test(r.ad_id));
+    expect(valid.length).toBeGreaterThan(0); // the backfill guarantees these exist
+    for (const row of valid) {
       expect(row.ad_key).toBe(row.ad_id);
       expect(row.ad_key_type).toBe("ad_id");
+    }
+    for (const row of data!.filter((r) => !/^[0-9]{6,}$/.test(r.ad_id))) {
+      expect(row.ad_key).not.toBe(row.ad_id);
     }
   });
 

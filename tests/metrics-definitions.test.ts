@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   CHECKOUT_COMPLETION_LABEL,
   CONVERSION_RATE_LABEL,
+  CPM_LABEL,
+  CTR_LABEL,
   checkoutCompletion,
   conversionRate,
+  cpa,
+  cpm,
+  ctr,
+  roas,
 } from "@/lib/metrics/definitions";
 
 describe("metric labels (AC-3)", () => {
@@ -46,6 +52,38 @@ describe("checkoutCompletion — paid payments over all attempts", () => {
 
   it("returns null rather than Infinity or NaN when there are no attempts", () => {
     expect(checkoutCompletion(0, 0)).toBeNull();
+  });
+});
+
+describe("ctr/cpm — Meta-native delivery ratios (2026-08-13 Ads restructure)", () => {
+  it("ctr divides clicks by impressions", () => {
+    // Live Love School all-time at build date: 17,185 clicks / 1,642,898 impressions.
+    expect(ctr(17185, 1642898)).toBeCloseTo(0.01046, 5);
+  });
+
+  it("cpm is spend per thousand impressions, in paise", () => {
+    // ₹100.00 (10000 paise) over 5,000 impressions = ₹20.00 CPM (2000 paise).
+    expect(cpm(10000, 5000)).toBe(2000);
+  });
+
+  it("both return null rather than Infinity or NaN with zero impressions", () => {
+    expect(ctr(0, 0)).toBeNull();
+    expect(ctr(5, 0)).toBeNull();
+    expect(cpm(10000, 0)).toBeNull();
+  });
+
+  it("labels exist and are distinct", () => {
+    expect(CTR_LABEL).toBe("CTR");
+    expect(CPM_LABEL).toBe("CPM");
+  });
+});
+
+describe("roas/cpa — null-on-zero-denominator contract", () => {
+  it("roas is null with zero spend, cpa is null with zero buyers", () => {
+    expect(roas(5000, 0)).toBeNull();
+    expect(cpa(0, 0)).toBeNull();
+    expect(roas(30000, 10000)).toBe(3);
+    expect(cpa(10000, 4)).toBe(2500);
   });
 });
 

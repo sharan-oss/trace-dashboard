@@ -149,6 +149,60 @@ export async function getAdAccountsSyncStatus(
   });
 }
 
+export type SyncRun = {
+  id: string;
+  kind: "backfill" | "nightly" | "manual";
+  status: "running" | "success" | "partial" | "failed";
+  date_from: string | null;
+  date_to: string | null;
+  ads_synced: number;
+  rows_upserted: number;
+  api_calls: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  account_name: string;
+};
+
+/**
+ * Run history for the sync log page — newest first, test fixtures excluded
+ * (same rule as the status note). RLS scopes tenants; the client_id filter is
+ * defense-in-depth, never the guarantee.
+ */
+export async function getSyncRuns(
+  supabase: SupabaseClient,
+  clientId: string,
+  limit = 50,
+): Promise<SyncRun[]> {
+  const { data, error } = await supabase
+    .from("ad_sync_runs")
+    .select(
+      "id, kind, status, date_from, date_to, ads_synced, rows_upserted, api_calls, error, started_at, finished_at, ad_accounts!inner(name, meta_ad_account_id)",
+    )
+    .eq("client_id", clientId)
+    .not("ad_accounts.meta_ad_account_id", "like", "act_test_%")
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`ad_sync_runs read failed: ${error.message}`);
+  return (data ?? []).map((row) => {
+    const account = row.ad_accounts as unknown as { name: string };
+    return {
+      id: row.id as string,
+      kind: row.kind as SyncRun["kind"],
+      status: row.status as SyncRun["status"],
+      date_from: row.date_from as string | null,
+      date_to: row.date_to as string | null,
+      ads_synced: row.ads_synced as number,
+      rows_upserted: row.rows_upserted as number,
+      api_calls: row.api_calls as number,
+      error: row.error as string | null,
+      started_at: row.started_at as string,
+      finished_at: row.finished_at as string | null,
+      account_name: account.name,
+    };
+  });
+}
+
 export type AdDimensionRow = {
   meta_ad_id: string;
   meta_adset_id: string | null;

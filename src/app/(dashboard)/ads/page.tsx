@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   IndianRupee,
@@ -324,7 +325,15 @@ export default async function AdsPage({
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <SyncStatusNote accounts={accounts} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <SyncStatusNote accounts={accounts} />
+          <Link
+            href="/ads/sync-log"
+            className="text-xs text-slate-500 underline decoration-white/15 underline-offset-2 transition-colors hover:text-slate-300"
+          >
+            Sync log
+          </Link>
+        </div>
         <SyncNowButton
           accounts={accounts.map((a) => ({
             meta_ad_account_id: a.meta_ad_account_id,

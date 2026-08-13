@@ -7,18 +7,32 @@ type Triple = { client_id: string; meta_campaign_id: string; ad_name: string };
 
 /** Groups raw `ads` rows by (client_id, meta_campaign_id, ad_name), the same
  * key v_ad_name_resolution groups by, so tests can find a known-ambiguous and
- * a known-unique triple straight from source data. */
+ * a known-unique triple straight from source data.
+ *
+ * Paged past PostgREST's 1000-row cap: an un-ranged select silently truncates
+ * (the dimension holds 1,233+ ads), and a truncated sample can call a name
+ * "unique" whose twin sits in the unseen tail — the view, which sees every
+ * row, then rightly disagrees. Bit for real on 2026-08-13 when a bulk update
+ * reshuffled tuple order and changed which rows the truncation kept. */
 async function groupAdsByTriple(): Promise<
   Map<string, { triple: Triple; ids: Set<string> }>
 > {
   const admin = await adminClient();
-  const { data: ads, error } = await admin
-    .from("ads")
-    .select("client_id, meta_campaign_id, ad_name, meta_ad_id");
-  if (error) throw new Error(error.message);
+  const ads: { client_id: string; meta_campaign_id: string; ad_name: string; meta_ad_id: string }[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await admin
+      .from("ads")
+      .select("client_id, meta_campaign_id, ad_name, meta_ad_id")
+      .order("meta_ad_id")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    ads.push(...(page ?? []));
+    if (!page || page.length < PAGE) break;
+  }
 
   const groups = new Map<string, { triple: Triple; ids: Set<string> }>();
-  for (const ad of ads!) {
+  for (const ad of ads) {
     const key = JSON.stringify([ad.client_id, ad.meta_campaign_id, ad.ad_name]);
     if (!groups.has(key)) {
       groups.set(key, {

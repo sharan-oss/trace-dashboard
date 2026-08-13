@@ -75,15 +75,19 @@ export function AdCard({ ad }: { ad: AdCardData }) {
   const name = ad.adName ?? ad.adKey;
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md">
+    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md transition-colors hover:border-white/20">
       {ad.thumbnailUrl != null ? (
         // Signed URL from the private bucket — plain img, remote next/image is
-        // pointless for a 1h-expiring URL.
+        // pointless for a 1h-expiring URL. Mirrored at 720x720 since the
+        // 2026-08-13 refresh; width/height reserve the box against CLS.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={ad.thumbnailUrl}
           alt=""
           loading="lazy"
+          decoding="async"
+          width={720}
+          height={720}
           className="aspect-square w-full border-b border-white/5 object-cover"
         />
       ) : (

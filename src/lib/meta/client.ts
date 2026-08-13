@@ -177,8 +177,12 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
     async listAds(adAccountId) {
       return requestAll<MetaAd>(
         endpoint(`${adAccountId}/ads`, {
+          // thumbnail_width/height field modifiers: Meta's thumbnail_url
+          // DEFAULTS TO 64x64 (probed live 2026-08-13 — 1.5KB of blur), and
+          // video ads have no image_url, so without the modifiers nearly every
+          // card creative renders soft. 720px covers a ~350px card at 2x.
           fields:
-            "id,name,adset{id,name},campaign{id,name},status,effective_status,creative{id,thumbnail_url,image_url,image_hash}",
+            "id,name,adset{id,name},campaign{id,name},status,effective_status,creative.thumbnail_width(720).thumbnail_height(720){id,thumbnail_url,image_url,image_hash}",
           // Include paused and archived ads, so a historical name match still
           // resolves after an ad is retired. DELETED is deliberately absent:
           // Meta refuses it on this edge (code 100 subcode 1815001, "Cannot

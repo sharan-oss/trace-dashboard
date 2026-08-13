@@ -285,8 +285,16 @@ export default async function AdsPage({
         campaignNames.set(c.campaignKey, c.campaignName ?? c.campaignKey);
       }
     }
-    // Unattributed campaign-tier rows never appear here: their revenue has no
-    // ads to card, so the banner inside AdCards carries it instead.
+    // Unattributed rows never appear as cards: their revenue has no ad to
+    // claim it, so the banner inside AdCards carries it instead. L2's share
+    // comes off the ad-tier null-key bucket — the exact complement of the
+    // rows carded above, so strip + banner always total the L2 KPI.
+    const unattributedL2 = breakdown
+      .filter((r) => r.tier === "ad" && r.ad_key == null)
+      .reduce(
+        (t, r) => ({ paise: t.paise + r.l2_revenue_paise, count: t.count + r.l2_count }),
+        { paise: 0, count: 0 },
+      );
     const campaigns = [...campaignNames.entries()]
       .map(([key, name]) => ({ key, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -298,6 +306,8 @@ export default async function AdsPage({
         spendUntrackedPaise={summary.spend_untracked_paise}
         unattributedL1RevenuePaise={summary.unattributed_l1_revenue_paise}
         unattributedL1Count={summary.unattributed_l1_count}
+        unattributedL2RevenuePaise={unattributedL2.paise}
+        unattributedL2Count={unattributedL2.count}
       />
     );
   }

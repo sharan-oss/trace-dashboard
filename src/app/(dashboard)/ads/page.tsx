@@ -12,6 +12,7 @@ import { AdCards } from "@/components/ads/ad-cards";
 import type { AdCardData } from "@/components/ads/ad-card";
 import { AdsTabs, type AdsTab } from "@/components/ads/ads-tabs";
 import { CampaignsTable } from "@/components/ads/campaigns-table";
+import { SyncNowButton } from "@/components/ads/sync-now-button";
 import { SyncStatusNote } from "@/components/ads/sync-status-note";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { KpiTile } from "@/components/overview/kpi-tile";
@@ -322,7 +323,16 @@ export default async function AdsPage({
         <DateRangePicker value={preset} />
       </header>
 
-      <SyncStatusNote accounts={accounts} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SyncStatusNote accounts={accounts} />
+        <SyncNowButton
+          accounts={accounts.map((a) => ({
+            meta_ad_account_id: a.meta_ad_account_id,
+            name: a.name,
+          }))}
+          anyRunning={accounts.some((a) => a.running_now)}
+        />
+      </div>
 
       <AdsTabs active={tab} range={preset} />
 

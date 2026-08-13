@@ -12,6 +12,10 @@
  */
 import { z } from "zod";
 import { requireCronOrAdmin } from "@/lib/auth/api-guard";
+
+// A per-account sync (dimension + 28d insights + capped thumbnail mirroring)
+// can outlast Vercel's default function window; 60s is legal on every plan.
+export const maxDuration = 60;
 import { createSyncClient } from "@/lib/auth/service-identity";
 import { createMetaClient, type MetaClient } from "@/lib/meta/client";
 import { getMetaConfig } from "@/lib/meta/env";

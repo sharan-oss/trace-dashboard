@@ -45,3 +45,26 @@ export function formatCount(n: number | null | undefined): string {
   if (n == null) return EM_DASH;
   return count.format(n);
 }
+
+/**
+ * An IST calendar day (YYYY-MM-DD, as the RPCs emit) rendered as "12 Jul".
+ * Parsed as UTC deliberately: the string is already an IST calendar date, so
+ * re-interpreting it in the viewer's zone would shift it by a day.
+ */
+export function formatDayShort(day: string | null | undefined): string {
+  if (day == null) return EM_DASH;
+  const parsed = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return EM_DASH;
+  return new Date(parsed).toLocaleDateString("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+/** Days rendered for humans: "3.4 days", "1 day", em dash when unknown. */
+export function formatDays(days: number | null | undefined): string {
+  if (days == null) return EM_DASH;
+  const rounded = days < 10 ? Math.round(days * 10) / 10 : Math.round(days);
+  return `${rounded} ${rounded === 1 ? "day" : "days"}`;
+}

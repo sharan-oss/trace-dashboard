@@ -19,6 +19,7 @@ import { DateRangePicker } from "@/components/date-range-picker";
 import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
+import { signCreativePaths } from "@/lib/creatives";
 import { formatCount, formatINR, formatPercent } from "@/lib/format";
 import {
   CONVERSION_RATE_LABEL,
@@ -43,38 +44,28 @@ import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-const CREATIVES_BUCKET = "ad-creatives";
-const SIGNED_URL_TTL_S = 3600;
-const SIGN_CHUNK = 200;
-
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
-/** Signed URLs for every dimension thumbnail, chunked under API limits. */
+/**
+ * Signed URLs for every dimension thumbnail, keyed by meta_ad_id. The signing
+ * itself lives in lib/creatives.ts, shared with the Customers section's ad
+ * previews.
+ */
 async function signThumbnails(
   supabase: SupabaseClient,
   dimension: AdDimensionRow[],
 ): Promise<Map<string, string>> {
   const withPath = dimension.filter((d) => d.creative_thumbnail_path != null);
+  const signed = await signCreativePaths(
+    supabase,
+    withPath.map((d) => d.creative_thumbnail_path as string),
+  );
   const out = new Map<string, string>();
-  for (let i = 0; i < withPath.length; i += SIGN_CHUNK) {
-    const chunk = withPath.slice(i, i + SIGN_CHUNK);
-    const { data: signed } = await supabase.storage
-      .from(CREATIVES_BUCKET)
-      .createSignedUrls(
-        chunk.map((d) => d.creative_thumbnail_path as string),
-        SIGNED_URL_TTL_S,
-      );
-    const byPath = new Map(
-      (signed ?? [])
-        .filter((s) => s.signedUrl != null && s.error == null)
-        .map((s) => [s.path, s.signedUrl]),
-    );
-    for (const d of chunk) {
-      const url = byPath.get(d.creative_thumbnail_path as string);
-      if (url != null) out.set(d.meta_ad_id, url);
-    }
+  for (const d of withPath) {
+    const url = signed.get(d.creative_thumbnail_path as string);
+    if (url != null) out.set(d.meta_ad_id, url);
   }
   return out;
 }

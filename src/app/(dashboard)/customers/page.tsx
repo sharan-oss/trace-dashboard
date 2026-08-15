@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   CalendarClock,
   IndianRupee,
@@ -8,12 +9,16 @@ import {
   Users,
 } from "lucide-react";
 import { AcquisitionTable } from "@/components/customers/acquisition-table";
+import { CustomerSheet } from "@/components/customers/customer-sheet";
+import { CustomersTabs, type CustomersTab } from "@/components/customers/customers-tabs";
+import { PeopleTable } from "@/components/customers/people-table";
 import { TopCustomersStrip } from "@/components/customers/top-customers-strip";
 import { ValueConcentrationBar } from "@/components/customers/value-concentration-bar";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
+import { getAdCreativeMeta, type AdCreativeMeta } from "@/lib/creatives";
 import {
   formatCount,
   formatDayShort,
@@ -32,11 +37,15 @@ import {
   repeatRate,
 } from "@/lib/metrics/definitions";
 import {
+  getCustomerDetail,
   getCustomersByAd,
   getCustomersKpis,
   getCustomersLadder,
+  getCustomersPage,
   getTopCustomers,
   splitFirstVsRepeat,
+  type PeopleSort,
+  type SortDir,
 } from "@/lib/queries/customers";
 import { getClients } from "@/lib/queries/overview";
 import { parseRangeParam } from "@/lib/range";
@@ -46,31 +55,56 @@ export const dynamic = "force-dynamic";
 
 const TOP_CUSTOMERS = 8;
 
+function first(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
 /**
- * Customers — the Value tab.
+ * Signed creative meta for the ad keys on screen, as a plain object — this
+ * crosses into client components (AdPeek), and a Map does not serialize.
+ */
+async function creativeMetaFor(
+  supabase: SupabaseClient,
+  clientId: string,
+  adKeys: (string | null)[],
+): Promise<Record<string, AdCreativeMeta>> {
+  const keys = adKeys.filter((k): k is string => k != null);
+  const map = await getAdCreativeMeta(supabase, clientId, keys);
+  return Object.fromEntries(map);
+}
+
+/**
+ * Customers — Value | People.
  *
- * /ads answers the media buyer's question, "which ad do I scale?". This page
- * answers the owner's: is the machine profitable, and can I afford to feed it
- * more? The two are not the same question, because the revenue that decides the
- * second one arrives days later on a payment link that never touches Trace's
- * checkout.
+ * /ads answers the media buyer's question, "which ad do I scale?". This
+ * section answers the owner's: is the machine profitable, and can I afford to
+ * feed it more? Value is the economics argument; People is the individuals
+ * behind it, with the receipts one click deep (?customer=).
  *
- * THE RANGE MEANS AN ACQUISITION COHORT — customers who FIRST paid in the
- * window, valued in full even when their upsell lands after it. That is what
- * makes LTV:CAC honest: both sides describe the same people. Enforced in SQL
- * (migration 20260816090200); see the design doc dated 2026-08-16.
- *
- * ?tab= is parsed but unused for now: the People tab (customer list, purchase
- * timelines) is v2, and a lone tab bar or a greyed-out "coming soon" would make
- * a finished page look unfinished.
+ * THE RANGE MEANS AN ACQUISITION COHORT on both tabs — customers who FIRST
+ * paid in the window, valued in full even when their upsell lands after it.
+ * That is what makes LTV:CAC honest, and it is why the two tabs can never
+ * disagree about who is included (asserted by test). Enforced in SQL for the
+ * Value RPCs (migration 20260816090200) and by rangeStartDay() for the People
+ * page read — the same day arithmetic on both sides.
  */
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string | string[] }>;
+  searchParams: Promise<{
+    range?: string | string[];
+    tab?: string | string[];
+    q?: string | string[];
+    sort?: string | string[];
+    dir?: string | string[];
+    repeat?: string | string[];
+    page?: string | string[];
+    customer?: string | string[];
+  }>;
 }) {
-  const { range } = await searchParams;
-  const preset = parseRangeParam(range);
+  const params = await searchParams;
+  const preset = parseRangeParam(params.range);
+  const tab: CustomersTab = first(params.tab) === "people" ? "people" : "value";
 
   const supabase = await createServerClient();
   const clients = await getClients(supabase);
@@ -94,11 +128,84 @@ export default async function CustomersPage({
     );
   }
 
+  // The People branch returns early: it shares the header/tabs shell but none
+  // of the Value tab's aggregates, so fetching them would be waste.
+  if (tab === "people") {
+    const sortParam = first(params.sort);
+    const sort: PeopleSort =
+      sortParam === "newest" || sortParam === "fastest" ? sortParam : "ltv";
+    const dirParam = first(params.dir);
+    const dir: SortDir = dirParam === "asc" || dirParam === "desc"
+      ? dirParam
+      : sort === "fastest"
+        ? "asc"
+        : "desc";
+    const search = first(params.q) ?? "";
+    const repeatOnly = first(params.repeat) === "1";
+    const pageNum = Math.max(0, Number.parseInt(first(params.page) ?? "0", 10) || 0);
+    const customerId = first(params.customer) || null;
+
+    const [{ rows, total }, detail] = await Promise.all([
+      getCustomersPage(supabase, selected.id, preset, {
+        search,
+        sort,
+        dir,
+        repeatOnly,
+        page: pageNum,
+      }),
+      customerId != null
+        ? getCustomerDetail(supabase, customerId)
+        : Promise.resolve(null),
+    ]);
+
+    const creativeMeta = await creativeMetaFor(supabase, selected.id, [
+      ...rows.map((r) => r.ad_key),
+      detail?.customer.ad_key ?? null,
+    ]);
+
+    return (
+      <div className="flex flex-col gap-6 p-6 sm:p-8">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Customers</h1>
+            <p className="mt-0.5 text-sm text-slate-400">
+              {selected.name} · people who first bought in this range, valued in
+              full
+            </p>
+          </div>
+          <DateRangePicker value={preset} />
+        </header>
+
+        <CustomersTabs active="people" range={preset} />
+
+        <PeopleTable
+          rows={rows}
+          total={total}
+          page={pageNum}
+          search={search}
+          sort={sort}
+          dir={dir}
+          repeatOnly={repeatOnly}
+          creativeMeta={creativeMeta}
+        />
+
+        {detail != null && (
+          <CustomerSheet detail={detail} creativeMeta={creativeMeta} />
+        )}
+      </div>
+    );
+  }
+
   const [kpis, byAd, ladder, top] = await Promise.all([
     getCustomersKpis(supabase, selected.id, preset),
     getCustomersByAd(supabase, selected.id, preset),
     getCustomersLadder(supabase, selected.id, preset),
     getTopCustomers(supabase, selected.id, preset, TOP_CUSTOMERS),
+  ]);
+
+  const creativeMeta = await creativeMetaFor(supabase, selected.id, [
+    ...top.map((r) => r.ad_key),
+    ...byAd.map((r) => r.ad_key),
   ]);
 
   const split = splitFirstVsRepeat(ladder);
@@ -141,6 +248,8 @@ export default async function CustomersPage({
         </div>
         <DateRangePicker value={preset} />
       </header>
+
+      <CustomersTabs active="value" range={preset} />
 
       <BentoGrid className="auto-rows-[minmax(120px,auto)]">
         <KpiTile
@@ -214,9 +323,9 @@ export default async function CustomersPage({
         totalCustomers={kpis.cohort_customers}
       />
 
-      <TopCustomersStrip rows={top} />
+      <TopCustomersStrip rows={top} creativeMeta={creativeMeta} />
 
-      <AcquisitionTable rows={byAd} />
+      <AcquisitionTable rows={byAd} creativeMeta={creativeMeta} />
     </div>
   );
 }

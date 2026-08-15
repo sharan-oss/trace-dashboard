@@ -1,3 +1,4 @@
+import { AdPeek } from "@/components/customers/ad-peek";
 import {
   Card,
   CardContent,
@@ -5,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import type { AdCreativeMeta } from "@/lib/creatives";
 import { formatCount, formatINR, formatPercent } from "@/lib/format";
 import { UNATTRIBUTED_LABEL } from "@/lib/metrics/attribution";
 import {
@@ -48,7 +50,13 @@ function NotApplicable({ title }: { title?: string }) {
   );
 }
 
-export function AcquisitionTable({ rows }: { rows: CustomersByAdRow[] }) {
+export function AcquisitionTable({
+  rows,
+  creativeMeta,
+}: {
+  rows: CustomersByAdRow[];
+  creativeMeta: Record<string, AdCreativeMeta>;
+}) {
   const unattributed = rows.filter((r) => r.ad_key == null);
   const attributed = rows.filter((r) => r.ad_key != null);
 
@@ -104,7 +112,11 @@ export function AcquisitionTable({ rows }: { rows: CustomersByAdRow[] }) {
               </tr>
             )}
             {[...shown, ...unattributed].map((row) => (
-              <Row key={row.ad_key ?? "∅"} row={row} />
+              <Row
+                key={row.ad_key ?? "∅"}
+                row={row}
+                meta={row.ad_key != null ? (creativeMeta[row.ad_key] ?? null) : null}
+              />
             ))}
           </tbody>
           <tfoot>
@@ -188,7 +200,13 @@ function RepeatCell({
   );
 }
 
-function Row({ row }: { row: CustomersByAdRow }) {
+function Row({
+  row,
+  meta,
+}: {
+  row: CustomersByAdRow;
+  meta: AdCreativeMeta | null;
+}) {
   const isUnattributed = row.ad_key == null;
   const label = row.ad_name ?? row.ad_key ?? UNATTRIBUTED_LABEL;
   const cacValue = cac(row.spend_paise, row.customers);
@@ -199,20 +217,20 @@ function Row({ row }: { row: CustomersByAdRow }) {
     <tr className="border-b border-white/5 text-slate-300 last:border-0">
       <td className="max-w-80 py-3 pr-4">
         <div className="truncate">
-          <span
-            className={
-              isUnattributed
-                ? "font-medium text-slate-400"
-                : "font-medium text-white"
-            }
-            title={
-              isUnattributed
-                ? "Customers whose acquiring payment resolved to no ad"
-                : (row.campaign_name ?? label)
-            }
-          >
-            {label}
-          </span>
+          {isUnattributed ? (
+            <span
+              className="font-medium text-slate-400"
+              title="Customers whose acquiring payment resolved to no ad"
+            >
+              {label}
+            </span>
+          ) : (
+            <AdPeek
+              label={label}
+              meta={meta}
+              className="cursor-help font-medium text-white underline decoration-white/20 decoration-dotted underline-offset-2 hover:decoration-indigo-400/60"
+            />
+          )}
           {spentNothingGained && (
             <span
               className="ml-2 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400"

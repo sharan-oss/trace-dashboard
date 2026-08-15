@@ -1,3 +1,4 @@
+import { AdPeek } from "@/components/customers/ad-peek";
 import {
   Card,
   CardContent,
@@ -7,6 +8,7 @@ import {
 } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { avatarDataUri } from "@/lib/avatars";
+import type { AdCreativeMeta } from "@/lib/creatives";
 import { formatCount, formatDays, formatINR } from "@/lib/format";
 import type { TopCustomerRow } from "@/lib/queries/customers";
 
@@ -24,7 +26,13 @@ import type { TopCustomerRow } from "@/lib/queries/customers";
  * who went on to spend this much. Customers whose acquiring payment resolved no
  * ad say so plainly rather than being hidden.
  */
-export function TopCustomersStrip({ rows }: { rows: TopCustomerRow[] }) {
+export function TopCustomersStrip({
+  rows,
+  creativeMeta,
+}: {
+  rows: TopCustomerRow[];
+  creativeMeta: Record<string, AdCreativeMeta>;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -83,12 +91,19 @@ export function TopCustomersStrip({ rows }: { rows: TopCustomerRow[] }) {
                   </p>
                 )}
 
-                <p
-                  className="mt-2 truncate text-[11px] text-slate-500"
-                  title={row.ad_name ?? row.ad_key ?? "No ad resolved"}
-                >
+                <p className="mt-2 truncate text-[11px] text-slate-500">
                   {row.ad_name ?? row.ad_key ? (
-                    <>via {row.ad_name ?? row.ad_key}</>
+                    <>
+                      via{" "}
+                      <AdPeek
+                        label={row.ad_name ?? (row.ad_key as string)}
+                        meta={
+                          row.ad_key != null
+                            ? (creativeMeta[row.ad_key] ?? null)
+                            : null
+                        }
+                      />
+                    </>
                   ) : (
                     <span className="text-slate-600">no ad resolved</span>
                   )}

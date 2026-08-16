@@ -148,6 +148,7 @@ export function AdCards({
   unattributedL1Count,
   unattributedL2RevenuePaise,
   unattributedL2Count,
+  l2WindowLabel = null,
 }: {
   ads: AdCardData[];
   campaigns: CampaignOption[];
@@ -158,6 +159,8 @@ export function AdCards({
   unattributedL1Count: number;
   unattributedL2RevenuePaise: number;
   unattributedL2Count: number;
+  /** Set only in split-window mode: which window the L2 figures cover. */
+  l2WindowLabel?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -443,6 +446,9 @@ export function AdCards({
             >
               Not attributable to any ad
             </span>
+            {l2WindowLabel != null && (
+              <StripMetric label="L2 window">{l2WindowLabel}</StripMetric>
+            )}
             <StripMetric label="Unattributed L1">
               {formatINR(unattributedL1RevenuePaise)} ({formatCount(unattributedL1Count)}{" "}
               payments)

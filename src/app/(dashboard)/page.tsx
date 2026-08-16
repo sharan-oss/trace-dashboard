@@ -13,7 +13,12 @@ import { KpiTile } from "@/components/overview/kpi-tile";
 import { RevenueChartCard } from "@/components/overview/revenue-chart-card";
 import { TopAdsTable } from "@/components/overview/top-ads-table";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
-import { formatCount, formatINR, formatPercent } from "@/lib/format";
+import {
+  formatCount,
+  formatDayRange,
+  formatINR,
+  formatPercent,
+} from "@/lib/format";
 import {
   CONVERSION_RATE_LABEL,
   CPA_LABEL,
@@ -23,15 +28,16 @@ import {
 } from "@/lib/metrics/definitions";
 import { getAdsSummary, getSpendDaily } from "@/lib/queries/ads";
 import {
+  chartSpan,
   fillDailyGaps,
   getClients,
   getOverviewKpis,
   getRevenueDaily,
   getTopAds,
+  hasExternalPayments,
   istToday,
-  rangeStartDay,
 } from "@/lib/queries/overview";
-import { parseRangeParam } from "@/lib/range";
+import { parseRangeState, type RangeSearchParams } from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -39,10 +45,9 @@ export const dynamic = "force-dynamic";
 export default async function OverviewPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string | string[] }>;
+  searchParams: Promise<RangeSearchParams>;
 }) {
-  const { range } = await searchParams;
-  const preset = parseRangeParam(range);
+  const state = parseRangeState(await searchParams);
 
   const supabase = await createServerClient();
   const clients = await getClients(supabase);
@@ -67,20 +72,27 @@ export default async function OverviewPage({
     );
   }
 
-  const [kpis, daily, ads, adsSummary, spendDaily] = await Promise.all([
-    getOverviewKpis(supabase, selected.id, preset),
-    getRevenueDaily(supabase, selected.id, preset),
-    getTopAds(supabase, selected.id, preset),
-    getAdsSummary(supabase, selected.id, preset),
-    getSpendDaily(supabase, selected.id, preset),
+  const [kpis, daily, ads, adsSummary, spendDaily, hasL2] = await Promise.all([
+    getOverviewKpis(supabase, selected.id, state),
+    getRevenueDaily(supabase, selected.id, state),
+    getTopAds(supabase, selected.id, state),
+    getAdsSummary(supabase, selected.id, state),
+    getSpendDaily(supabase, selected.id, state),
+    hasExternalPayments(supabase, selected.id),
   ]);
   const cpaValue = cpa(adsSummary.spend_paise, kpis.l1_paid_count);
 
+  // In split mode the L2 window is stamped onto every surface that shows L2,
+  // so a screenshot always says which window produced the number.
+  const l2WindowLabel =
+    state.l2 == null ? null : formatDayRange(state.l2.from, state.l2.to);
+
   const today = istToday();
+  const span = chartSpan(state, today);
   const fromDay =
-    rangeStartDay(preset, today) ?? daily[0]?.day ?? spendDaily[0]?.day ?? today;
+    span.from ?? daily[0]?.day ?? spendDaily[0]?.day ?? span.to;
   const spendByDay = new Map(spendDaily.map((r) => [r.day, r]));
-  const chartData = fillDailyGaps(daily, fromDay, today).map((r) => {
+  const chartData = fillDailyGaps(daily, fromDay, span.to).map((r) => {
     const s = spendByDay.get(r.day);
     const spend = s?.spend_paise ?? 0;
     const paid = s?.l1_paid_count ?? 0;
@@ -100,7 +112,7 @@ export default async function OverviewPage({
           <h1 className="text-2xl font-bold text-white">Overview</h1>
           <p className="mt-0.5 text-sm text-slate-400">{selected.name}</p>
         </div>
-        <DateRangePicker value={preset} />
+        <DateRangePicker state={state} showCustom showL2Toggle={hasL2} />
       </header>
 
       <BentoGrid className="auto-rows-[minmax(120px,auto)]">
@@ -122,7 +134,11 @@ export default async function OverviewPage({
           label="L2 revenue"
           value={formatINR(kpis.l2_revenue_paise)}
           valueSuffix={`(${formatCount(kpis.l2_count)})`}
-          caption="Partial import — backfill pending"
+          caption={
+            l2WindowLabel == null
+              ? "Partial import — backfill pending"
+              : `Paid ${l2WindowLabel} · buyers acquired in the main range`
+          }
           icon={TrendingUp}
           hero
         />
@@ -151,9 +167,9 @@ export default async function OverviewPage({
         />
       </BentoGrid>
 
-      <RevenueChartCard data={chartData} />
+      <RevenueChartCard data={chartData} l2WindowLabel={l2WindowLabel} />
 
-      <TopAdsTable rows={ads} />
+      <TopAdsTable rows={ads} l2WindowLabel={l2WindowLabel} />
     </div>
   );
 }

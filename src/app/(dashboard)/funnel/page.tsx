@@ -12,7 +12,7 @@ import {
   type FunnelLens,
 } from "@/lib/queries/funnel";
 import { getClients } from "@/lib/queries/overview";
-import { parseRangeParam } from "@/lib/range";
+import { parseRangeParam, presetState } from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -116,7 +116,7 @@ export default async function FunnelPage({
             {selected.name} · from click to payment, stage by stage
           </p>
         </div>
-        <DateRangePicker value={preset} />
+        <DateRangePicker state={presetState(preset)} />
       </header>
 
       <FunnelStages overview={overview} />

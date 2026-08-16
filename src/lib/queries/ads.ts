@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { rangeToDays, type RangePreset } from "@/lib/range";
+import {
+  rangeRpcArgs,
+  rangeRpcArgsWithL2,
+  type RangeState,
+} from "@/lib/range";
 
 /**
  * Ads-section read layer. Every aggregate is computed in Postgres by the RPCs
@@ -64,12 +68,9 @@ async function rpcRows<T>(
   supabase: SupabaseClient,
   fn: string,
   clientId: string,
-  preset: RangePreset,
+  args: Record<string, unknown>,
 ): Promise<T[]> {
-  const { data, error } = await supabase.rpc(fn, {
-    p_client_id: clientId,
-    p_days: rangeToDays(preset),
-  });
+  const { data, error } = await supabase.rpc(fn, { p_client_id: clientId, ...args });
   if (error) throw new Error(`${fn} failed: ${error.message}`);
   return (data ?? []) as T[];
 }
@@ -77,17 +78,28 @@ async function rpcRows<T>(
 export async function getAdsBreakdown(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<AdsBreakdownRow[]> {
-  return rpcRows<AdsBreakdownRow>(supabase, "ads_breakdown", clientId, preset);
+  return rpcRows<AdsBreakdownRow>(
+    supabase,
+    "ads_breakdown",
+    clientId,
+    rangeRpcArgsWithL2(state),
+  );
 }
 
+/** Spend and unattributed L1 only — no L2 arm, so no L2 window to pass. */
 export async function getAdsSummary(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<AdsSummary> {
-  const rows = await rpcRows<AdsSummary>(supabase, "ads_summary", clientId, preset);
+  const rows = await rpcRows<AdsSummary>(
+    supabase,
+    "ads_summary",
+    clientId,
+    rangeRpcArgs(state),
+  );
   return (
     rows[0] ?? {
       spend_paise: 0,
@@ -101,9 +113,14 @@ export async function getAdsSummary(
 export async function getSpendDaily(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<SpendDailyRow[]> {
-  return rpcRows<SpendDailyRow>(supabase, "overview_spend_daily", clientId, preset);
+  return rpcRows<SpendDailyRow>(
+    supabase,
+    "overview_spend_daily",
+    clientId,
+    rangeRpcArgs(state),
+  );
 }
 
 /**

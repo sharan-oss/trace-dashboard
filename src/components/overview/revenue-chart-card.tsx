@@ -88,7 +88,14 @@ function formatDay(day: unknown): string {
   return Number.isNaN(t) ? String(day) : dayTick.format(t);
 }
 
-export function RevenueChartCard({ data }: { data: OverviewChartRow[] }) {
+export function RevenueChartCard({
+  data,
+  l2WindowLabel = null,
+}: {
+  data: OverviewChartRow[];
+  /** Set only in split-window mode; the revenue tab then says which window L2 covers. */
+  l2WindowLabel?: string | null;
+}) {
   const [tab, setTab] = useState<Tab>("revenue");
   const config: ChartConfig =
     tab === "revenue" ? revenueConfig : tab === "spends" ? spendConfig : cpaConfig;
@@ -102,6 +109,9 @@ export function RevenueChartCard({ data }: { data: OverviewChartRow[] }) {
           </CardTitle>
           <CardDescription className="text-sm text-slate-400">
             {COPY[tab].description}
+            {l2WindowLabel != null &&
+              tab === "revenue" &&
+              ` · L2 limited to ${l2WindowLabel}`}
           </CardDescription>
         </div>
         <div

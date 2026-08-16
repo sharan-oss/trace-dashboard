@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
+import { presetState, type RangeState } from "@/lib/range";
 import { adminClient, clientClient } from "./helpers/supabase";
 import {
   fillDailyGaps,
@@ -70,7 +71,7 @@ describe("overview_kpis — reconciliation and invariants", () => {
     const ls = await loveSchoolId(admin);
 
     await attemptStable(async () => {
-      const kpis = await getOverviewKpis(admin, ls, "all");
+      const kpis = await getOverviewKpis(admin, ls, presetState("all"));
       const rows = await pageAll(async (from, to) => {
         const { data, error } = await admin
           .from("v_payments_attributed")
@@ -96,7 +97,7 @@ describe("overview_kpis — reconciliation and invariants", () => {
     const ls = await loveSchoolId(admin);
 
     await attemptStable(async () => {
-      const kpis = await getOverviewKpis(admin, ls, "all");
+      const kpis = await getOverviewKpis(admin, ls, presetState("all"));
       const { data: externals, error } = await admin
         .from("external_payments")
         .select("amount, external_order_id")
@@ -127,9 +128,9 @@ describe("overview_kpis — reconciliation and invariants", () => {
     // Called in widening order so live inserts can only preserve ≤.
     const admin = await adminClient();
     const ls = await loveSchoolId(admin);
-    const k7 = await getOverviewKpis(admin, ls, "7d");
-    const k30 = await getOverviewKpis(admin, ls, "30d");
-    const kAll = await getOverviewKpis(admin, ls, "all");
+    const k7 = await getOverviewKpis(admin, ls, presetState("7d"));
+    const k30 = await getOverviewKpis(admin, ls, presetState("30d"));
+    const kAll = await getOverviewKpis(admin, ls, presetState("all"));
     for (const key of [
       "l1_revenue_paise",
       "l1_paid_count",
@@ -152,8 +153,8 @@ describe("overview_revenue_daily — reconciliation", () => {
 
     await attemptStable(async () => {
       const [kpis, daily] = await Promise.all([
-        getOverviewKpis(admin, ls, "30d"),
-        getRevenueDaily(admin, ls, "30d"),
+        getOverviewKpis(admin, ls, presetState("30d")),
+        getRevenueDaily(admin, ls, presetState("30d")),
       ]);
       const l1 = daily.reduce((s, d) => s + d.l1_revenue_paise, 0);
       const l2 = daily.reduce((s, d) => s + d.l2_revenue_paise, 0);
@@ -165,7 +166,7 @@ describe("overview_revenue_daily — reconciliation", () => {
   it("returns days sorted ascending with no duplicates", async () => {
     const admin = await adminClient();
     const ls = await loveSchoolId(admin);
-    const daily = await getRevenueDaily(admin, ls, "all");
+    const daily = await getRevenueDaily(admin, ls, presetState("all"));
     const days = daily.map((d) => d.day);
     expect(days).toEqual([...days].sort());
     expect(new Set(days).size).toBe(days.length);
@@ -181,8 +182,8 @@ describe("overview_top_ads — reconciliation and grouping", () => {
 
     await attemptStable(async () => {
       const [kpis, ads] = await Promise.all([
-        getOverviewKpis(admin, ls, "all"),
-        getTopAds(admin, ls, "all"),
+        getOverviewKpis(admin, ls, presetState("all")),
+        getTopAds(admin, ls, presetState("all")),
       ]);
       const l1 = ads.reduce((s, a) => s + a.l1_revenue_paise, 0);
       const l2 = ads.reduce((s, a) => s + a.l2_revenue_paise, 0);
@@ -197,7 +198,7 @@ describe("overview_top_ads — reconciliation and grouping", () => {
     // campaign-scoped name rule exists for).
     const admin = await adminClient();
     const ls = await loveSchoolId(admin);
-    const ads = await getTopAds(admin, ls, "all");
+    const ads = await getTopAds(admin, ls, presetState("all"));
     const keysByName = new Map<string, Set<string>>();
     for (const a of ads) {
       if (a.ad_key == null || a.ad_name == null) continue;
@@ -221,13 +222,13 @@ describe("overview RPCs — tenant scoping through the SDK", () => {
     const other = (await getClients(admin)).find((c) => !ownIds.has(c.id));
     if (!other) throw new Error("no second tenant available");
 
-    const kpis = await getOverviewKpis(client, other.id, "all");
+    const kpis = await getOverviewKpis(client, other.id, presetState("all"));
     expect(kpis.l1_revenue_paise).toBe(0);
     expect(kpis.l1_paid_count).toBe(0);
     expect(kpis.l2_revenue_paise).toBe(0);
     expect(kpis.sessions_count).toBe(0);
-    expect(await getTopAds(client, other.id, "all")).toHaveLength(0);
-    expect(await getRevenueDaily(client, other.id, "all")).toHaveLength(0);
+    expect(await getTopAds(client, other.id, presetState("all"))).toHaveLength(0);
+    expect(await getRevenueDaily(client, other.id, presetState("all"))).toHaveLength(0);
   });
 
   it("denies the anon role execute on all three RPCs", async () => {
@@ -323,5 +324,202 @@ describe("fillDailyGaps", () => {
   it("handles an empty range as all zeros", () => {
     const filled = fillDailyGaps([], "2026-08-01", "2026-08-02");
     expect(filled).toEqual([row("2026-08-01", 0, 0), row("2026-08-02", 0, 0)]);
+  });
+});
+
+/**
+ * Custom windows and the optional cohort-scoped L2 window
+ * (supabase/migrations/20260817090000_custom_windows_and_cohort_l2.sql).
+ *
+ * The first two tests are the safety net for every existing client: the
+ * extended signatures must not have changed what a preset call returns, and
+ * the old two-argument call shape must still resolve to exactly one function.
+ */
+describe("overview RPCs — custom L1 window", () => {
+  const FNS = ["overview_kpis", "overview_revenue_daily", "overview_top_ads"] as const;
+
+  it("returns identical rows whether the new params are omitted or passed as null", async () => {
+    // Catches: a leftover (uuid, int) overload — PostgREST answers an
+    // ambiguous call with PGRST203 rather than picking one.
+    const admin = await adminClient();
+    const ls = await loveSchoolId(admin);
+
+    await attemptStable(async () => {
+      for (const fn of FNS) {
+        const [old, explicit] = await Promise.all([
+          admin.rpc(fn, { p_client_id: ls, p_days: 30 }),
+          admin.rpc(fn, {
+            p_client_id: ls,
+            p_days: 30,
+            p_from: null,
+            p_to: null,
+            p_l2_from: null,
+            p_l2_to: null,
+          }),
+        ]);
+        expect(old.error, `${fn} old call shape must still resolve`).toBeNull();
+        expect(explicit.error).toBeNull();
+        expect(explicit.data).toEqual(old.data);
+      }
+    });
+  });
+
+  it("treats a preset and its explicit start date as the same window", async () => {
+    // Pins the SQL cutoff rule to rangeStartDay's copy of it; if either
+    // drifts by a day, the People page and the RPCs disagree silently.
+    const admin = await adminClient();
+    const ls = await loveSchoolId(admin);
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const from = rangeStartDay("30d", today)!;
+
+    await attemptStable(async () => {
+      const [preset, explicit] = await Promise.all([
+        getOverviewKpis(admin, ls, presetState("30d")),
+        getOverviewKpis(admin, ls, { l1: { kind: "custom", from, to: today }, l2: null }),
+      ]);
+      expect(explicit.l1_revenue_paise).toBe(preset.l1_revenue_paise);
+      expect(explicit.l1_paid_count).toBe(preset.l1_paid_count);
+      expect(explicit.sessions_count).toBe(preset.sessions_count);
+    });
+  });
+
+  it("bounds the window at both ends", async () => {
+    // Catches: p_to ignored, which would silently widen every custom window
+    // to "from that day onward".
+    const admin = await adminClient();
+    const ls = await loveSchoolId(admin);
+    const daily = await getRevenueDaily(admin, ls, presetState("all"));
+    const withRevenue = daily.filter((d) => d.l1_revenue_paise > 0);
+    if (withRevenue.length === 0) return;
+    const day = withRevenue[Math.floor(withRevenue.length / 2)].day;
+
+    const oneDay = await getRevenueDaily(admin, ls, {
+      l1: { kind: "custom", from: day, to: day },
+      l2: null,
+    });
+    expect(oneDay.every((r) => r.day === day)).toBe(true);
+  });
+});
+
+describe("overview RPCs — cohort-scoped L2 window", () => {
+  /** A client with L2 rows, and a window pair that actually contains some. */
+  async function splitFixture(admin: SupabaseClient) {
+    const clients = await getClients(admin);
+    for (const c of clients) {
+      const all = await getRevenueDaily(admin, c.id, presetState("all"));
+      const l2Days = all.filter((r) => r.l2_revenue_paise > 0).map((r) => r.day).sort();
+      if (l2Days.length === 0) continue;
+      return {
+        clientId: c.id,
+        l2From: l2Days[0],
+        l2To: l2Days[l2Days.length - 1],
+      };
+    }
+    return null;
+  }
+
+  it("never counts more L2 than the payment-date rule over the same window", async () => {
+    // Cohort membership is an extra condition on the same set of payments, so
+    // it can only shrink it. Equality is NOT asserted: the two rules mean
+    // different things by design, and asserting it would enshrine a bug.
+    const admin = await adminClient();
+    const fx = await splitFixture(admin);
+    if (fx == null) return;
+
+    await attemptStable(async () => {
+      const [cohort, byPaymentDate] = await Promise.all([
+        getOverviewKpis(admin, fx.clientId, {
+          l1: { kind: "preset", preset: "all" },
+          l2: { from: fx.l2From, to: fx.l2To },
+        }),
+        getOverviewKpis(admin, fx.clientId, {
+          l1: { kind: "custom", from: fx.l2From, to: fx.l2To },
+          l2: null,
+        }),
+      ]);
+      expect(cohort.l2_revenue_paise).toBeLessThanOrEqual(byPaymentDate.l2_revenue_paise);
+      expect(cohort.l2_count).toBeLessThanOrEqual(byPaymentDate.l2_count);
+    });
+  });
+
+  it("leaves L1 and sessions untouched — the split only re-scopes L2", async () => {
+    // Catches: the L2 window leaking into the L1 or sessions predicates.
+    const admin = await adminClient();
+    const fx = await splitFixture(admin);
+    if (fx == null) return;
+
+    await attemptStable(async () => {
+      const [plain, split] = await Promise.all([
+        getOverviewKpis(admin, fx.clientId, presetState("all")),
+        getOverviewKpis(admin, fx.clientId, {
+          l1: { kind: "preset", preset: "all" },
+          l2: { from: fx.l2From, to: fx.l2To },
+        }),
+      ]);
+      expect(split.l1_revenue_paise).toBe(plain.l1_revenue_paise);
+      expect(split.l1_paid_count).toBe(plain.l1_paid_count);
+      expect(split.sessions_count).toBe(plain.sessions_count);
+    });
+  });
+
+  it("reconciles the KPI total with the per-ad and daily breakdowns", async () => {
+    // The Unattributed bucket is why this can break: if cohort mode dropped
+    // unlinked payments from one function but not another, the tiles and the
+    // table would disagree on screen.
+    const admin = await adminClient();
+    const fx = await splitFixture(admin);
+    if (fx == null) return;
+    const state: RangeState = {
+      l1: { kind: "preset", preset: "all" },
+      l2: { from: fx.l2From, to: fx.l2To },
+    };
+
+    await attemptStable(async () => {
+      const [kpis, ads, daily] = await Promise.all([
+        getOverviewKpis(admin, fx.clientId, state),
+        getTopAds(admin, fx.clientId, state),
+        getRevenueDaily(admin, fx.clientId, state),
+      ]);
+      const adsTotal = ads.reduce((t, a) => t + a.l2_revenue_paise, 0);
+      const dailyTotal = daily.reduce((t, d) => t + d.l2_revenue_paise, 0);
+      expect(adsTotal).toBe(kpis.l2_revenue_paise);
+      expect(dailyTotal).toBe(kpis.l2_revenue_paise);
+    });
+  });
+
+  it("puts every L2 rupee inside the L2 window", async () => {
+    // Catches: an L2 payment bucketed to its customer's acquisition day
+    // rather than its own paid day, which would draw the webinar's revenue
+    // on the wrong dates.
+    const admin = await adminClient();
+    const fx = await splitFixture(admin);
+    if (fx == null) return;
+
+    const daily = await getRevenueDaily(admin, fx.clientId, {
+      l1: { kind: "preset", preset: "all" },
+      l2: { from: fx.l2From, to: fx.l2To },
+    });
+    for (const row of daily) {
+      if (row.l2_revenue_paise > 0) {
+        expect(row.day >= fx.l2From && row.day <= fx.l2To).toBe(true);
+      }
+    }
+  });
+
+  it("denies the anon role execute on the extended signatures", async () => {
+    // Catches: grants not re-issued after the drop/create — a new signature
+    // starts life with Supabase's default execute grant to anon.
+    const anon = anonClient();
+    for (const fn of ["overview_kpis", "overview_revenue_daily", "overview_top_ads"]) {
+      const { error } = await anon.rpc(fn, {
+        p_client_id: "00000000-0000-0000-0000-000000000000",
+        p_days: null,
+        p_from: null,
+        p_to: null,
+        p_l2_from: "2026-08-15",
+        p_l2_to: "2026-08-16",
+      });
+      expect(error, `${fn} must not be callable as anon`).not.toBeNull();
+    }
   });
 });

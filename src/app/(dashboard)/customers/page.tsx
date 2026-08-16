@@ -48,7 +48,7 @@ import {
   type SortDir,
 } from "@/lib/queries/customers";
 import { getClients } from "@/lib/queries/overview";
-import { parseRangeParam } from "@/lib/range";
+import { parseRangeParam, presetState } from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -173,7 +173,7 @@ export default async function CustomersPage({
               full
             </p>
           </div>
-          <DateRangePicker value={preset} />
+          <DateRangePicker state={presetState(preset)} />
         </header>
 
         <CustomersTabs active="people" range={preset} />
@@ -246,7 +246,7 @@ export default async function CustomersPage({
             full
           </p>
         </div>
-        <DateRangePicker value={preset} />
+        <DateRangePicker state={presetState(preset)} />
       </header>
 
       <CustomersTabs active="value" range={preset} />

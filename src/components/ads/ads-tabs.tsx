@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import type { RangePreset } from "@/lib/range";
 
 export type AdsTab = "campaigns" | "ads";
 
@@ -9,11 +8,22 @@ export type AdsTab = "campaigns" | "ads";
  * names. Plain links, so tab state lives in the URL (?tab=) and stays
  * shareable; switching back to Campaigns deliberately drops any ?campaign=
  * filter, which only means something inside the Ads view.
+ *
+ * `rangeQuery` is the serialized window (serializeRangeState) rather than a
+ * bare preset: these hrefs are built from scratch, so anything not named here
+ * — a custom window, a separate L2 window — would be silently reset on a tab
+ * switch.
  */
-export function AdsTabs({ active, range }: { active: AdsTab; range: RangePreset }) {
+export function AdsTabs({
+  active,
+  rangeQuery,
+}: {
+  active: AdsTab;
+  rangeQuery: string;
+}) {
   const tabs: { key: AdsTab; label: string; href: string }[] = [
-    { key: "campaigns", label: "Campaigns", href: `/ads?tab=campaigns&range=${range}` },
-    { key: "ads", label: "Ads", href: `/ads?tab=ads&range=${range}` },
+    { key: "campaigns", label: "Campaigns", href: `/ads?tab=campaigns&${rangeQuery}` },
+    { key: "ads", label: "Ads", href: `/ads?tab=ads&${rangeQuery}` },
   ];
   return (
     <nav

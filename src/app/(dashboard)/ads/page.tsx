@@ -20,7 +20,12 @@ import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { signCreativePaths } from "@/lib/creatives";
-import { formatCount, formatINR, formatPercent } from "@/lib/format";
+import {
+  formatCount,
+  formatDayRange,
+  formatINR,
+  formatPercent,
+} from "@/lib/format";
 import {
   CONVERSION_RATE_LABEL,
   CPA_LABEL,
@@ -38,8 +43,16 @@ import {
   type AdsBreakdownRow,
   type AdDimensionRow,
 } from "@/lib/queries/ads";
-import { getClients, getOverviewKpis } from "@/lib/queries/overview";
-import { parseRangeParam } from "@/lib/range";
+import {
+  getClients,
+  getOverviewKpis,
+  hasExternalPayments,
+} from "@/lib/queries/overview";
+import {
+  parseRangeState,
+  serializeRangeState,
+  type RangeSearchParams,
+} from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -136,14 +149,19 @@ function mergeCards(
 export default async function AdsPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    range?: string | string[];
-    tab?: string | string[];
-    campaign?: string | string[];
-  }>;
+  searchParams: Promise<
+    RangeSearchParams & {
+      tab?: string | string[];
+      campaign?: string | string[];
+    }
+  >;
 }) {
   const params = await searchParams;
-  const preset = parseRangeParam(params.range);
+  const state = parseRangeState(params);
+  // Links built from scratch below would otherwise drop the window entirely.
+  const rangeQuery = serializeRangeState(state);
+  const l2WindowLabel =
+    state.l2 == null ? null : formatDayRange(state.l2.from, state.l2.to);
   const tab: AdsTab = first(params.tab) === "ads" ? "ads" : "campaigns";
   const campaignParam = first(params.campaign) || null;
 
@@ -197,14 +215,15 @@ export default async function AdsPage({
     );
   }
 
-  const [summary, breakdown] = await Promise.all([
-    getAdsSummary(supabase, selected.id, preset),
-    getAdsBreakdown(supabase, selected.id, preset),
+  const [summary, breakdown, hasL2] = await Promise.all([
+    getAdsSummary(supabase, selected.id, state),
+    getAdsBreakdown(supabase, selected.id, state),
+    hasExternalPayments(supabase, selected.id),
   ]);
 
   let view: React.ReactNode;
   if (tab === "campaigns") {
-    const kpis = await getOverviewKpis(supabase, selected.id, preset);
+    const kpis = await getOverviewKpis(supabase, selected.id, state);
     const totalRevenue = kpis.l1_revenue_paise + kpis.l2_revenue_paise;
     const roasValue = roas(totalRevenue, summary.spend_paise);
     const cpaValue = cpa(summary.spend_paise, kpis.l1_paid_count);
@@ -230,7 +249,11 @@ export default async function AdsPage({
             label="L2 revenue"
             value={formatINR(kpis.l2_revenue_paise)}
             valueSuffix={`(${formatCount(kpis.l2_count)})`}
-            caption="Credited to the acquiring ad"
+            caption={
+              l2WindowLabel == null
+                ? "Credited to the acquiring ad"
+                : `Paid ${l2WindowLabel} · credited to the acquiring ad`
+            }
             icon={TrendingUp}
             hero
           />
@@ -240,7 +263,9 @@ export default async function AdsPage({
             caption={
               roasValue == null
                 ? "No Meta spend in range"
-                : "Full customer value ÷ Meta spend"
+                : l2WindowLabel == null
+                  ? "Full customer value ÷ Meta spend"
+                  : `L1 in range + L2 from ${l2WindowLabel} ÷ Meta spend`
             }
             icon={Target}
           />
@@ -261,7 +286,8 @@ export default async function AdsPage({
         </BentoGrid>
         <CampaignsTable
           rows={breakdown}
-          range={preset}
+          rangeQuery={rangeQuery}
+          l2WindowLabel={l2WindowLabel}
           spendUntrackedPaise={summary.spend_untracked_paise}
           unattributedL1RevenuePaise={summary.unattributed_l1_revenue_paise}
           unattributedL1Count={summary.unattributed_l1_count}
@@ -301,6 +327,7 @@ export default async function AdsPage({
         unattributedL1Count={summary.unattributed_l1_count}
         unattributedL2RevenuePaise={unattributedL2.paise}
         unattributedL2Count={unattributedL2.count}
+        l2WindowLabel={l2WindowLabel}
       />
     );
   }
@@ -312,7 +339,7 @@ export default async function AdsPage({
           <h1 className="text-2xl font-bold text-white">Ads</h1>
           <p className="mt-0.5 text-sm text-slate-400">{selected.name}</p>
         </div>
-        <DateRangePicker value={preset} />
+        <DateRangePicker state={state} showCustom showL2Toggle={hasL2} />
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -334,7 +361,7 @@ export default async function AdsPage({
         />
       </div>
 
-      <AdsTabs active={tab} range={preset} />
+      <AdsTabs active={tab} rangeQuery={rangeQuery} />
 
       {view}
     </div>

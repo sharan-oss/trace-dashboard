@@ -62,6 +62,24 @@ export function formatDayShort(day: string | null | undefined): string {
   });
 }
 
+/**
+ * An inclusive day window as "1 – 15 Aug", dropping the repeated month when
+ * both ends share one, and collapsing to a single day when they are equal.
+ */
+export function formatDayRange(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): string {
+  const left = formatDayShort(from);
+  const right = formatDayShort(to);
+  if (left === EM_DASH || right === EM_DASH) return EM_DASH;
+  if (left === right) return left;
+  const leftMonth = left.slice(left.indexOf(" ") + 1);
+  const rightMonth = right.slice(right.indexOf(" ") + 1);
+  const leftText = leftMonth === rightMonth ? left.slice(0, left.indexOf(" ")) : left;
+  return `${leftText} – ${right}`;
+}
+
 /** Days rendered for humans: "3.4 days", "1 day", em dash when unknown. */
 export function formatDays(days: number | null | undefined): string {
   if (days == null) return EM_DASH;

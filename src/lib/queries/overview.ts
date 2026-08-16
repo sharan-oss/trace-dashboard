@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { rangeToDays, type RangePreset } from "@/lib/range";
+import {
+  rangeRpcArgs,
+  rangeRpcArgsWithL2,
+  rangeToDays,
+  type RangePreset,
+  type RangeState,
+} from "@/lib/range";
 
 /**
  * Overview read layer. Every aggregate is computed in Postgres by the three
@@ -36,15 +42,16 @@ export type TopAdRow = {
 
 export type ClientRow = { id: string; name: string };
 
+/** All three Overview aggregates carry an L2 arm, so all three take the L2 window. */
 async function rpcRows<T>(
   supabase: SupabaseClient,
   fn: string,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<T[]> {
   const { data, error } = await supabase.rpc(fn, {
     p_client_id: clientId,
-    p_days: rangeToDays(preset),
+    ...rangeRpcArgsWithL2(state),
   });
   if (error) throw new Error(`${fn} failed: ${error.message}`);
   return (data ?? []) as T[];
@@ -53,9 +60,9 @@ async function rpcRows<T>(
 export async function getOverviewKpis(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<OverviewKpis> {
-  const rows = await rpcRows<OverviewKpis>(supabase, "overview_kpis", clientId, preset);
+  const rows = await rpcRows<OverviewKpis>(supabase, "overview_kpis", clientId, state);
   return (
     rows[0] ?? {
       l1_revenue_paise: 0,
@@ -70,17 +77,36 @@ export async function getOverviewKpis(
 export async function getRevenueDaily(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<RevenueDailyRow[]> {
-  return rpcRows<RevenueDailyRow>(supabase, "overview_revenue_daily", clientId, preset);
+  return rpcRows<RevenueDailyRow>(supabase, "overview_revenue_daily", clientId, state);
 }
 
 export async function getTopAds(
   supabase: SupabaseClient,
   clientId: string,
-  preset: RangePreset,
+  state: RangeState,
 ): Promise<TopAdRow[]> {
-  return rpcRows<TopAdRow>(supabase, "overview_top_ads", clientId, preset);
+  return rpcRows<TopAdRow>(supabase, "overview_top_ads", clientId, state);
+}
+
+/**
+ * Does this client have any L2 rows at all? Gates the split-window control so
+ * clients with no upsell import never see a setting that could only ever read
+ * zero. A keyed existence read, not an aggregate — RLS scopes it, the
+ * client_id filter is defense-in-depth.
+ */
+export async function hasExternalPayments(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("external_payments")
+    .select("id")
+    .eq("client_id", clientId)
+    .limit(1);
+  if (error) throw new Error(`external_payments probe failed: ${error.message}`);
+  return (data ?? []).length > 0;
 }
 
 /**
@@ -118,6 +144,30 @@ export function rangeStartDay(
   const t = Date.parse(`${today}T00:00:00Z`) - (days - 1) * DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
+
+/**
+ * The chart's x-axis span for a range state. In split mode it covers the union
+ * of both windows, so the webinar days an L2 payment lands on are actually
+ * drawn instead of falling off the right edge of the ad window. A null `from`
+ * means all time — the caller falls back to the data's own first day.
+ */
+export function chartSpan(
+  state: RangeState,
+  today: string,
+): { from: string | null; to: string } {
+  const base =
+    state.l1.kind === "custom"
+      ? { from: state.l1.from as string | null, to: state.l1.to }
+      : { from: rangeStartDay(state.l1.preset, today), to: today };
+  if (state.l2 == null) return base;
+  return {
+    from: base.from == null ? null : min(base.from, state.l2.from),
+    to: max(base.to, state.l2.to),
+  };
+}
+
+const min = (a: string, b: string) => (a <= b ? a : b);
+const max = (a: string, b: string) => (a >= b ? a : b);
 
 /**
  * Insert zero-revenue rows for every missing day in [fromDay, toDay] so the

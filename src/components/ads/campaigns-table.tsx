@@ -15,7 +15,6 @@ import { formatCount, formatINR } from "@/lib/format";
 import { UNATTRIBUTED_LABEL } from "@/lib/metrics/attribution";
 import { cpa, roas } from "@/lib/metrics/definitions";
 import type { AdsBreakdownRow } from "@/lib/queries/ads";
-import type { RangePreset } from "@/lib/range";
 
 /**
  * The Campaigns view: one row per campaign, five decision metrics
@@ -36,7 +35,10 @@ import type { RangePreset } from "@/lib/range";
 
 type Props = {
   rows: AdsBreakdownRow[];
-  range: RangePreset;
+  /** Serialized window, so drill-down links keep custom and L2 windows. */
+  rangeQuery: string;
+  /** Set only in split-window mode: which window the L2 column covers. */
+  l2WindowLabel?: string | null;
   spendUntrackedPaise: number;
   unattributedL1RevenuePaise: number;
   unattributedL1Count: number;
@@ -79,7 +81,8 @@ function MoneyCell({
 
 export function CampaignsTable({
   rows,
-  range,
+  rangeQuery,
+  l2WindowLabel = null,
   spendUntrackedPaise,
   unattributedL1RevenuePaise,
   unattributedL1Count,
@@ -88,7 +91,7 @@ export function CampaignsTable({
   const campaigns = rows.filter((r) => r.tier === "campaign");
 
   function adsHref(campaignKey: string) {
-    return `/ads?tab=ads&campaign=${encodeURIComponent(campaignKey)}&range=${range}`;
+    return `/ads?tab=ads&campaign=${encodeURIComponent(campaignKey)}&${rangeQuery}`;
   }
 
   return (
@@ -98,6 +101,7 @@ export function CampaignsTable({
         <CardDescription className="text-sm text-slate-400">
           Click a campaign to see its ads · revenue attributed by Trace, spend
           reported by Meta
+          {l2WindowLabel != null && ` · L2 paid ${l2WindowLabel}`}
         </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">

@@ -24,7 +24,14 @@ import type { TopAdRow } from "@/lib/queries/overview";
  * white/5 row dividers, numbers right-aligned, the highlight column (L2 —
  * the acquisition story) tinted indigo-300.
  */
-export function TopAdsTable({ rows }: { rows: TopAdRow[] }) {
+export function TopAdsTable({
+  rows,
+  l2WindowLabel = null,
+}: {
+  rows: TopAdRow[];
+  /** Set only in split-window mode, so the L2 column says which window it covers. */
+  l2WindowLabel?: string | null;
+}) {
   const groups = groupWithUnattributed(
     rows,
     (r) => r.ad_key,
@@ -56,6 +63,7 @@ export function TopAdsTable({ rows }: { rows: TopAdRow[] }) {
         <CardDescription className="text-sm text-slate-400">
           By attributed revenue — L2 credited to the ad behind the
           customer&apos;s first purchase
+          {l2WindowLabel != null && ` · L2 paid ${l2WindowLabel}`}
         </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">

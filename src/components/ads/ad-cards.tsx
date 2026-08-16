@@ -149,6 +149,7 @@ export function AdCards({
   unattributedL2RevenuePaise,
   unattributedL2Count,
   l2WindowLabel = null,
+  metaAdAccountId = null,
 }: {
   ads: AdCardData[];
   campaigns: CampaignOption[];
@@ -161,6 +162,8 @@ export function AdCards({
   unattributedL2Count: number;
   /** Set only in split-window mode: which window the L2 figures cover. */
   l2WindowLabel?: string | null;
+  /** Enables each card's Ads Manager link; null just hides it. */
+  metaAdAccountId?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -479,7 +482,7 @@ export function AdCards({
         <>
           <div className="mt-1 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {visible.map((ad) => (
-              <AdCard key={ad.adKey} ad={ad} />
+              <AdCard key={ad.adKey} ad={ad} metaAdAccountId={metaAdAccountId} />
             ))}
           </div>
           {filtered.length > visibleCount && (

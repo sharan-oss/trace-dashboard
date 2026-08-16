@@ -74,6 +74,8 @@ describe("runNightlyForAccounts — failure isolation", () => {
         return [];
       },
       getAdInsights: async (): Promise<MetaInsightRow[]> => [],
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
     };
 
     const outcomes = await runNightlyForAccounts({ db, meta }, fixtures, {

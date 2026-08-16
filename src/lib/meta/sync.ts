@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MetaClient } from "@/lib/meta/client";
 import { toMinorUnits } from "@/lib/meta/money";
 import { mirrorThumbnails } from "@/lib/meta/thumbnails";
-import type { MetaAd } from "@/lib/meta/types";
+import type { MetaAd, MetaAdVideo } from "@/lib/meta/types";
 
 export type SyncAccount = {
   /** ad_accounts.id (uuid), not the Meta act_ id. */
@@ -41,13 +41,65 @@ export type SyncResult =
 
 export type SyncDeps = {
   db: SupabaseClient;
-  meta: Pick<MetaClient, "listAds" | "getAdInsights">;
+  meta: Pick<MetaClient, "listAds" | "getAdInsights" | "listAdImages" | "listAdVideos">;
   /** Reads the running HTTP-request count (wired to the client's onRequest). */
   apiCallCount?: () => number;
   /** When set, mirror creative thumbnails as part of the run (AC-11). Omit to
    * skip — e.g. unit tests that only exercise the spend path. */
   thumbnails?: { limit?: number; fetchImpl?: typeof fetch };
 };
+
+/**
+ * The poster hash, wherever Meta happened to put it. Classic ads carry it on
+ * the creative or in object_story_spec; Advantage+/dynamic ads populate only
+ * asset_feed_spec and leave the rest null. Checking one place silently loses
+ * whole creative types.
+ */
+function imageHashOf(ad: MetaAd): string | undefined {
+  const c = ad.creative;
+  return (
+    c?.image_hash ??
+    c?.object_story_spec?.video_data?.image_hash ??
+    c?.object_story_spec?.link_data?.image_hash ??
+    c?.object_story_spec?.photo_data?.image_hash ??
+    c?.asset_feed_spec?.images?.find((i) => i.hash)?.hash ??
+    c?.asset_feed_spec?.videos?.find((v) => v.thumbnail_hash)?.thumbnail_hash
+  );
+}
+
+function videoIdOf(ad: MetaAd): string | undefined {
+  const c = ad.creative;
+  return (
+    c?.video_id ??
+    c?.object_story_spec?.video_data?.video_id ??
+    c?.asset_feed_spec?.videos?.find((v) => v.video_id)?.video_id
+  );
+}
+
+/** A creative url already present on the ad, needing no catalog lookup. */
+function inlineUrlOf(ad: MetaAd): string | undefined {
+  const c = ad.creative;
+  return (
+    c?.image_url ??
+    c?.object_story_spec?.video_data?.image_url ??
+    c?.object_story_spec?.link_data?.picture ??
+    c?.asset_feed_spec?.videos?.find((v) => v.thumbnail_url)?.thumbnail_url ??
+    c?.asset_feed_spec?.images?.find((i) => i.url)?.url
+  );
+}
+
+/** Poster frame for a video, preferring a real extracted frame over `picture`,
+ * which can be Meta's grey "still processing" placeholder. Picks the smallest
+ * rung at or above card size so we never mirror a 64px blur. */
+function posterOf(video: MetaAdVideo): string | undefined {
+  const preferred = video.thumbnails?.data?.find((t) => t.is_preferred)?.uri;
+  const anyFrame = video.thumbnails?.data?.find((t) => t.uri)?.uri;
+  const ladder = (video.format ?? [])
+    .filter((f) => f.picture != null)
+    .sort((a, b) => (a.width ?? 0) - (b.width ?? 0));
+  const rung = ladder.find((f) => (f.width ?? 0) >= 320) ?? ladder.at(-1);
+  return preferred ?? anyFrame ?? rung?.picture ?? video.picture;
+}
 
 function usableAd(ad: MetaAd): ad is MetaAd & {
   adset: { id: string; name: string };
@@ -56,12 +108,36 @@ function usableAd(ad: MetaAd): ad is MetaAd & {
   return Boolean(ad.id && ad.name && ad.adset?.id && ad.adset.name && ad.campaign?.id && ad.campaign.name);
 }
 
+/**
+ * How stale the dimension may get before a full walk is forced. Incremental
+ * walks cannot see deletions — Meta simply stops mentioning a removed ad — so
+ * retirement would never fire without periodically re-listing everything.
+ */
+const FULL_WALK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Newest last_synced_at for this account, or null if we hold no ads yet. */
+async function lastDimensionSync(
+  db: SupabaseClient,
+  accountId: string
+): Promise<string | null> {
+  const { data } = await db
+    .from("ads")
+    .select("last_synced_at")
+    .eq("ad_account_id", accountId)
+    .not("last_synced_at", "is", null)
+    .order("last_synced_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.last_synced_at as string | undefined) ?? null;
+}
+
 export async function runAdAccountSync(
   deps: SyncDeps,
   account: SyncAccount,
   dateFrom: string,
   dateTo: string,
-  kind: "manual" | "nightly" | "backfill" = "manual"
+  kind: "manual" | "nightly" | "backfill" = "manual",
+  forceFullWalk = false
 ): Promise<SyncResult> {
   const { db, meta } = deps;
   const apiCalls = deps.apiCallCount ?? (() => 0);
@@ -97,9 +173,24 @@ export async function runAdAccountSync(
 
   try {
     const now = new Date().toISOString();
+    let creativeFailures = 0;
 
-    // 1. Dimension: adopt/refresh every ad the account has.
-    const ads = await meta.listAds(account.meta_ad_account_id);
+    // 1. Dimension: adopt/refresh the account's ads. Incremental whenever we
+    //    already hold rows for this account — a full walk costs ~6 API calls
+    //    on a large account and the dev tier only affords 60 per 5 minutes,
+    //    so re-listing 2,540 unchanged ads every run is budget we need for
+    //    the spend data. A full walk still happens the first time, and
+    //    whenever the caller forces one.
+    const newest = forceFullWalk ? null : await lastDimensionSync(db, account.id);
+    // Full walk when we hold nothing, when forced, or once a week so deletions
+    // are eventually noticed; incremental the rest of the time.
+    const stale =
+      newest != null && Date.now() - new Date(newest).getTime() > FULL_WALK_MAX_AGE_MS;
+    const since = stale ? null : newest;
+    const ads = await meta.listAds(
+      account.meta_ad_account_id,
+      since == null ? undefined : Math.floor(new Date(since).getTime() / 1000)
+    );
     const usable = ads.filter(usableAd);
     if (usable.length > 0) {
       const { error } = await db.from("ads").upsert(
@@ -115,7 +206,9 @@ export async function runAdAccountSync(
           // Meta's effective_status (what is actually happening) over status
           // (what the advertiser set), lowercased verbatim — no invented enum.
           status: (ad.effective_status ?? ad.status).toLowerCase(),
-          creative_source_url: ad.creative?.image_url ?? ad.creative?.thumbnail_url ?? null,
+          meta_creative_id: ad.creative?.id ?? null,
+          meta_image_hash: imageHashOf(ad) ?? null,
+          meta_video_id: videoIdOf(ad) ?? null,
           last_synced_at: now,
         })),
         { onConflict: "meta_ad_id" }
@@ -127,12 +220,17 @@ export async function runAdAccountSync(
       // goes inactive. Never deleted: names keep resolving, history is
       // untouched. Guarded on a non-empty listing so a fluke empty response
       // can never mass-retire an account.
-      const { error: retireError } = await db
-        .from("ads")
-        .update({ status: "inactive" })
-        .eq("ad_account_id", account.id)
-        .or(`last_synced_at.lt.${now},last_synced_at.is.null`);
-      if (retireError) throw new Error(`inactive marking failed: ${retireError.message}`);
+      // Only ever on a FULL walk: after an incremental one, "not re-listed"
+      // means "unchanged", and retiring on that would mark the whole account
+      // inactive on the first quiet night.
+      if (since == null) {
+        const { error: retireError } = await db
+          .from("ads")
+          .update({ status: "inactive" })
+          .eq("ad_account_id", account.id)
+          .or(`last_synced_at.lt.${now},last_synced_at.is.null`);
+        if (retireError) throw new Error(`inactive marking failed: ${retireError.message}`);
+      }
     }
 
     // 2. Resolve meta_ad_id → ads.id for the insights foreign key. Paged:
@@ -218,6 +316,96 @@ export async function runAdAccountSync(
       if (error) throw new Error(`ad_insights_daily upsert failed: ${error.message}`);
     }
 
+    // 3b. Creative source urls, resolved from the ACCOUNT'S ASSET CATALOGS
+    //     rather than by asking Meta to render a thumbnail per ad.
+    //
+    //     The identifiers were already stored above for free — they ride along
+    //     as plain JSON on the creative. Here two bulk edge reads turn them
+    //     into urls: /adimages gives a documented-PERMANENT permalink_url, and
+    //     /advideos gives a poster-frame ladder we pick a card-sized rung from.
+    //     Both are account-scoped, so they cost the same for 2,540 ads as for
+    //     25,000 — where the old per-ad render walk cost ~102 calls and blew
+    //     the tier's whole budget.
+    //
+    //     Still last, and still non-fatal: a catalog read that fails costs
+    //     pictures, never the spend data already written above.
+    if (deps.thumbnails) {
+      try {
+        const pending: { meta_ad_id: string; meta_image_hash: string | null; meta_video_id: string | null }[] = [];
+        const PAGE = 1000;
+        for (let from = 0; ; from += PAGE) {
+          // Paged: PostgREST caps ANY select at 1000 rows, `.limit(5000)`
+          // included, so an unpaged read silently covers a third of a large
+          // account and calls it done.
+          const { data, error: pendingError } = await db
+            .from("ads")
+            .select("meta_ad_id, meta_image_hash, meta_video_id")
+            .eq("ad_account_id", account.id)
+            .is("creative_source_url", null)
+            .order("meta_ad_id")
+            .range(from, from + PAGE - 1);
+          if (pendingError) throw new Error(pendingError.message);
+          pending.push(...((data ?? []) as typeof pending));
+          if (!data || data.length < PAGE) break;
+        }
+
+        if (pending.length > 0) {
+          // Deduped: an account reuses one asset across many ads, so the
+          // catalogs we fetch are far smaller than the ad count.
+          const hashes = [...new Set(pending.map((p) => p.meta_image_hash).filter((h): h is string => h != null))];
+          const videoIds = [...new Set(pending.map((p) => p.meta_video_id).filter((v): v is string => v != null))];
+
+          const [images, videos] = await Promise.all([
+            hashes.length > 0 ? meta.listAdImages(account.meta_ad_account_id) : Promise.resolve([]),
+            videoIds.length > 0 ? meta.listAdVideos(account.meta_ad_account_id) : Promise.resolve([]),
+          ]);
+
+          const urlByHash = new Map(
+            images
+              .filter((i) => i.hash != null)
+              // permalink_url first: `url` is documented "temporary".
+              .map((i) => [i.hash, i.permalink_url ?? i.url])
+              .filter((e): e is [string, string] => e[1] != null)
+          );
+          const posterByVideo = new Map(
+            videos
+              .map((v: MetaAdVideo) => [v.id, posterOf(v)] as const)
+              .filter((e): e is [string, string] => e[1] != null)
+          );
+
+          const inlineByAd = new Map(
+            usable.map((ad) => [ad.id, inlineUrlOf(ad)] as const).filter((e) => e[1] != null)
+          );
+
+          const updates = pending
+            .map((row) => {
+              const url =
+                (row.meta_image_hash != null ? urlByHash.get(row.meta_image_hash) : undefined) ??
+                (row.meta_video_id != null ? posterByVideo.get(row.meta_video_id) : undefined) ??
+                inlineByAd.get(row.meta_ad_id);
+              return url == null ? null : { meta_ad_id: row.meta_ad_id, creative_source_url: url };
+            })
+            .filter((u): u is { meta_ad_id: string; creative_source_url: string } => u != null);
+
+          if (updates.length > 0) {
+            const { error: creativeError } = await db.from("ads").upsert(
+              updates.map((u) => ({
+                client_id: account.client_id,
+                ad_account_id: account.id,
+                meta_ad_id: u.meta_ad_id,
+                creative_source_url: u.creative_source_url,
+              })),
+              { onConflict: "meta_ad_id" }
+            );
+            if (creativeError) creativeFailures = updates.length;
+          }
+          creativeFailures += pending.length - updates.length;
+        }
+      } catch {
+        creativeFailures += 1;
+      }
+    }
+
     // 4. Creative thumbnails (AC-11) — failures degrade, never abort.
     let thumbs = { mirrored: 0, failed: 0 };
     if (deps.thumbnails) {
@@ -232,6 +420,7 @@ export async function runAdAccountSync(
     const problems = [
       skipped > 0 ? `${skipped} insight rows had no dimension row` : null,
       thumbs.failed > 0 ? `${thumbs.failed} thumbnails failed to mirror` : null,
+      creativeFailures > 0 ? `${creativeFailures} creative urls unresolved` : null,
     ].filter(Boolean);
     const status = problems.length > 0 ? "partial" : "success";
     await db

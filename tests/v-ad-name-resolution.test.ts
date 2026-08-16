@@ -59,17 +59,32 @@ describe(VIEW, () => {
     const ambiguous = [...groups.values()].filter((g) => g.ids.size > 1);
     expect(ambiguous.length).toBeGreaterThan(0); // the fixture this test needs exists
 
+    // One paged read of the view, then set membership — NOT a query per
+    // ambiguous triple. Ad names are reused heavily, so the per-triple form
+    // issued hundreds of round trips and timed out once the dimension grew
+    // past ~3,700 rows.
+    const present = new Set<string>();
     const admin = await adminClient();
-    for (const { triple } of ambiguous) {
-      const { data, error } = await admin
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await admin
         .from(VIEW)
-        .select("meta_ad_id")
-        .eq("client_id", triple.client_id)
-        .eq("meta_campaign_id", triple.meta_campaign_id)
-        .eq("ad_name", triple.ad_name.trim());
+        .select("client_id, meta_campaign_id, ad_name")
+        .order("meta_ad_id")
+        .range(from, from + PAGE - 1);
       if (error) throw new Error(error.message);
-      expect(data).toEqual([]);
+      for (const r of page ?? []) {
+        present.add(JSON.stringify([r.client_id, r.meta_campaign_id, r.ad_name]));
+      }
+      if (!page || page.length < PAGE) break;
     }
+
+    const leaked = ambiguous
+      .map(({ triple }) =>
+        JSON.stringify([triple.client_id, triple.meta_campaign_id, triple.ad_name.trim()]),
+      )
+      .filter((key) => present.has(key));
+    expect(leaked).toEqual([]);
   });
 
   it("includes a name unique within its campaign, mapped to the correct ad", async () => {

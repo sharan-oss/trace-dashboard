@@ -101,10 +101,11 @@ describe(`${VIEW} — key resolution`, () => {
     }
   });
 
-  it("resolves ad keys by extraction for a client with no stored ids and no seeded ads", async () => {
-    // Occultyogis Vastu: zero stored ids, zero rows in `ads`, but ~2,000
-    // extractable ad ids. This is the regression that would break a design
-    // reading only stored columns or requiring an `ads` row to exist.
+  it("resolves ad keys by extraction for a client with no stored ids", async () => {
+    // Occultyogis Vastu: zero stored ids, but ~2,000 extractable ad ids. This
+    // is the regression that would break a design reading only stored columns.
+    // Their `ads` rows arrived with the 2026-08-17 sync, which is precisely why
+    // the filter here is on a null stored id rather than on the client.
     const admin = await adminClient();
     const { data, error } = await admin
       .from(VIEW)
@@ -119,13 +120,26 @@ describe(`${VIEW} — key resolution`, () => {
 
   it("never resolves an ad name that is ambiguous within its campaign", async () => {
     const admin = await adminClient();
-    const { data: ads, error: adsError } = await admin
-      .from("ads")
-      .select("client_id, meta_campaign_id, ad_name, meta_ad_id");
-    if (adsError) throw new Error(adsError.message);
+    // Paged: PostgREST caps an un-ranged select at 1000 rows, and `ads` passed
+    // that long ago (3,700+ after the 2026-08-17 Occultyogis sync). Truncation
+    // here does not fail the test — it silently shrinks the set of ambiguous
+    // names it knows about, so the assertion below quietly stops checking most
+    // of them. Same bug class as the Slice C insight-row orphaning.
+    const ads: { client_id: string; meta_campaign_id: string; ad_name: string; meta_ad_id: string }[] = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: adsError } = await admin
+        .from("ads")
+        .select("client_id, meta_campaign_id, ad_name, meta_ad_id")
+        .order("meta_ad_id")
+        .range(from, from + PAGE - 1);
+      if (adsError) throw new Error(adsError.message);
+      ads.push(...((page ?? []) as typeof ads));
+      if (!page || page.length < PAGE) break;
+    }
 
     const counts = new Map<string, Set<string>>();
-    for (const ad of ads!) {
+    for (const ad of ads) {
       const key = `${ad.client_id}|${ad.meta_campaign_id}|${ad.ad_name}`;
       if (!counts.has(key)) counts.set(key, new Set());
       counts.get(key)!.add(ad.meta_ad_id);

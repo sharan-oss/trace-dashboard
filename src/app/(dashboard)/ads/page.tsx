@@ -328,6 +328,7 @@ export default async function AdsPage({
         unattributedL2RevenuePaise={unattributedL2.paise}
         unattributedL2Count={unattributedL2.count}
         l2WindowLabel={l2WindowLabel}
+        metaAdAccountId={accounts[0]?.meta_ad_account_id ?? null}
       />
     );
   }

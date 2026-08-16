@@ -30,16 +30,29 @@ export async function mirrorThumbnails(options: MirrorOptions): Promise<MirrorRe
   const { db, accountId, limit } = options;
   const doFetch = options.fetchImpl ?? globalThis.fetch;
 
-  let query = db
-    .from("ads")
-    .select("id, client_id, meta_ad_id, creative_source_url")
-    .eq("ad_account_id", accountId)
-    .not("creative_source_url", "is", null)
-    .is("creative_thumbnail_path", null);
-  if (limit !== undefined) query = query.limit(limit);
+  // Paged: PostgREST caps ANY select at 1000 rows, `.limit(100000)` included
+  // (verified live 2026-08-17), so the backfill's "uncapped" intent silently
+  // became "first 1000" — an account with 2,540 ads kept over half its cards
+  // blank however often the sync ran. Rows are consumed as they are mirrored,
+  // so each page re-queries from offset 0 against a shrinking candidate set.
+  const PAGE = 1000;
+  const target = limit ?? Number.POSITIVE_INFINITY;
+  const pending: { id: string; client_id: string; meta_ad_id: string; creative_source_url: string }[] =
+    [];
 
-  const { data: pending, error } = await query;
-  if (error) throw new Error(`thumbnail candidate query failed: ${error.message}`);
+  while (pending.length < target) {
+    const { data, error } = await db
+      .from("ads")
+      .select("id, client_id, meta_ad_id, creative_source_url")
+      .eq("ad_account_id", accountId)
+      .not("creative_source_url", "is", null)
+      .is("creative_thumbnail_path", null)
+      .order("id")
+      .range(pending.length, Math.min(pending.length + PAGE, target) - 1);
+    if (error) throw new Error(`thumbnail candidate query failed: ${error.message}`);
+    pending.push(...((data ?? []) as typeof pending));
+    if (!data || data.length < PAGE) break;
+  }
 
   let mirrored = 0;
   let failed = 0;

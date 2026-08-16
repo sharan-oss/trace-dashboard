@@ -71,6 +71,9 @@ const Body = z
     // The local backfill passes a huge limit for the uncapped initial mirror;
     // interactive calls keep the nightly cap.
     thumbnail_limit: z.number().int().positive().max(100_000).optional(),
+    /** Re-list every ad instead of only what changed. Costs more API budget;
+     * needed after a schema change that adds a column the dimension fills. */
+    full: z.boolean().optional(),
   })
   .refine((b) => (b.date ? !b.date_from && !b.date_to : Boolean(b.date_from && b.date_to)), {
     message: "provide either date, or date_from and date_to",
@@ -126,7 +129,8 @@ export async function POST(request: Request): Promise<Response> {
       account,
       dateFrom,
       dateTo,
-      parsed.data.kind
+      parsed.data.kind,
+      parsed.data.full ?? false
     );
     if (result.conflict) {
       return Response.json(

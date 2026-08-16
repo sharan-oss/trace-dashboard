@@ -1,6 +1,7 @@
-import { ImageOff } from "lucide-react";
+import { ExternalLink, ImageOff } from "lucide-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCount, formatINR, formatPercent } from "@/lib/format";
+import { adsManagerUrl } from "@/lib/meta/ads-manager";
 import { cpa, cpm, ctr, roas } from "@/lib/metrics/definitions";
 
 /**
@@ -65,7 +66,14 @@ function Metric({
   );
 }
 
-export function AdCard({ ad }: { ad: AdCardData }) {
+export function AdCard({
+  ad,
+  metaAdAccountId = null,
+}: {
+  ad: AdCardData;
+  /** Enables the Ads Manager link; null just hides it. */
+  metaAdAccountId?: string | null;
+}) {
   const totalRevenue = ad.l1RevenuePaise + ad.l2RevenuePaise;
   const roasValue = roas(totalRevenue, ad.spendPaise);
   const cpaValue = cpa(ad.spendPaise, ad.l1PaidCount);
@@ -73,9 +81,25 @@ export function AdCard({ ad }: { ad: AdCardData }) {
   const cpmValue = cpm(ad.spendPaise, ad.impressions);
   const group = statusGroup(ad.status);
   const name = ad.adName ?? ad.adKey;
+  const metaUrl = adsManagerUrl(metaAdAccountId, ad.adKey);
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md transition-colors hover:border-white/20">
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md transition-colors hover:border-white/20">
+      {metaUrl != null && (
+        // The escape hatch for what a still frame cannot show — full video,
+        // carousel frames, the live creative. Meta resolves the id at click
+        // time, so it never goes stale, and it costs no API call.
+        <a
+          href={metaUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this ad in Meta Ads Manager"
+          className="absolute top-2 right-2 z-10 rounded-md border border-white/10 bg-slate-950/70 p-1.5 text-slate-300 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:text-white"
+        >
+          <ExternalLink size={14} aria-hidden="true" />
+          <span className="sr-only">Open {name} in Meta Ads Manager</span>
+        </a>
+      )}
       {ad.thumbnailUrl != null ? (
         // Signed URL from the private bucket — plain img, remote next/image is
         // pointless for a 1h-expiring URL. Mirrored at 720x720 since the

@@ -37,6 +37,18 @@ const AD_2: MetaAd = {
   campaign: { id: "test_sync_campaign_1", name: "Test Sync Campaign" },
 };
 
+/** A minimal usable ad for the incremental-walk tests. */
+function adFixture(id: string): MetaAd {
+  return {
+    id,
+    name: `fixture ${id}`,
+    status: "ACTIVE",
+    effective_status: "ACTIVE",
+    adset: { id: "test_sync_adset_1", name: "Test Sync Adset" },
+    campaign: { id: "test_sync_campaign_1", name: "Test Sync Campaign" },
+  };
+}
+
 function insightRow(adId: string, spend: string): MetaInsightRow {
   return {
     ad_id: adId,
@@ -53,6 +65,8 @@ function fakeMeta(ads: MetaAd[], insights: MetaInsightRow[]) {
   return {
     listAds: async () => ads,
     getAdInsights: async () => insights,
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
   };
 }
 
@@ -172,8 +186,11 @@ describe("runAdAccountSync", () => {
   });
 
   it("marks ads absent from Meta's listing inactive, retaining the row", async () => {
+    // Retirement is a FULL-walk concern only: an incremental walk omits
+    // unchanged ads too, so "Meta didn't mention it" cannot mean "it's gone".
+    // Hence the explicit force on the second run.
     await runAdAccountSync({ db, meta: fakeMeta([AD_1, AD_2], []) }, account, DATE, DATE);
-    await runAdAccountSync({ db, meta: fakeMeta([AD_1], []) }, account, DATE, DATE);
+    await runAdAccountSync({ db, meta: fakeMeta([AD_1], []) }, account, DATE, DATE, "manual", true);
 
     const { data: gone } = await db.from("ads").select("status, ad_name").eq("meta_ad_id", "test_sync_ad_2").single();
     expect(gone?.status).toBe("inactive");
@@ -256,6 +273,8 @@ describe("runAdAccountSync", () => {
       getAdInsights: async (): Promise<MetaInsightRow[]> => {
         throw new Error("insights exploded");
       },
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
     };
     await expect(runAdAccountSync({ db, meta }, account, DATE, DATE)).rejects.toThrow("insights exploded");
 
@@ -286,5 +305,84 @@ describe("runAdAccountSync", () => {
     expect(result.conflict).toBe(true);
 
     await db.from("ad_sync_runs").delete().eq("id", blocker!.id);
+  });
+});
+
+describe("runAdAccountSync — incremental dimension walk", () => {
+  let incAccount: SyncAccount;
+
+  beforeAll(async () => {
+    const { data } = await db
+      .from("ad_accounts")
+      .upsert(
+        {
+          client_id: account.client_id,
+          meta_ad_account_id: "act_test_incremental_fixture",
+          name: "TEST FIXTURE — incremental walk",
+          currency: "INR",
+          timezone_name: "Asia/Kolkata",
+          status: "disconnected",
+        },
+        { onConflict: "meta_ad_account_id" },
+      )
+      .select("id, client_id, meta_ad_account_id, currency")
+      .single();
+    incAccount = data as SyncAccount;
+    await db.from("ads").delete().eq("ad_account_id", incAccount.id);
+  });
+
+  // The dev tier affords 60 API points per 5 minutes. Re-walking a 2,540-ad
+  // account every run spends that budget before the spend data is fetched —
+  // exactly how the first Occultyogis backfill failed.
+  const INC_1 = "test_sync_ad_inc_1";
+  const INC_2 = "test_sync_ad_inc_2";
+
+  afterAll(async () => {
+    await db.from("ads").delete().like("meta_ad_id", "test_sync_ad_inc_%");
+    await db.from("ad_sync_runs").delete().eq("ad_account_id", incAccount.id);
+  });
+
+  it("walks in full when it holds no ads for the account, then incrementally after", async () => {
+    await db.from("ads").delete().eq("ad_account_id", incAccount.id);
+
+    const seen: (number | undefined)[] = [];
+    const metaFor = (ads: MetaAd[]) => ({
+      listAds: async (_id: string, updatedSince?: number) => {
+        seen.push(updatedSince);
+        return ads;
+      },
+      getAdInsights: async (): Promise<MetaInsightRow[]> => [],
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
+    });
+
+    await runAdAccountSync({ db, meta: metaFor([adFixture(INC_1)]) }, incAccount, DATE, DATE);
+    expect(seen[0], "first run holds nothing, so it must walk in full").toBeUndefined();
+
+    await runAdAccountSync({ db, meta: metaFor([]) }, incAccount, DATE, DATE);
+    expect(typeof seen[1], "second run must ask only for what changed").toBe("number");
+  });
+
+  it("never retires ads on an incremental walk", async () => {
+    // After an incremental walk "not re-listed" means "unchanged". Retiring on
+    // that would mark a whole account inactive on the first quiet night.
+    await db.from("ads").delete().eq("ad_account_id", incAccount.id);
+    const meta = (ads: MetaAd[]) => ({
+      listAds: async () => ads,
+      getAdInsights: async (): Promise<MetaInsightRow[]> => [],
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
+    });
+
+    await runAdAccountSync({ db, meta: meta([adFixture(INC_1)]) }, incAccount, DATE, DATE);
+    // Now incremental: Meta reports only a different, changed ad.
+    await runAdAccountSync({ db, meta: meta([adFixture(INC_2)]) }, incAccount, DATE, DATE);
+
+    const { data: survivor } = await db
+      .from("ads")
+      .select("status")
+      .eq("meta_ad_id", INC_1)
+      .single();
+    expect(survivor?.status, "an unchanged ad must not be retired").toBe("active");
   });
 });

@@ -64,8 +64,8 @@ export default async function OverviewPage({
         <div className="rounded-2xl border border-border bg-card p-10 text-center backdrop-blur-md">
           <Users size={24} className="mx-auto mb-3 text-slate-600" />
           <p className="text-sm text-slate-400">
-            No clients are visible to this identity. Check the dev identity
-            env (DEV_ROLE / DEV_CLIENT_ID).
+            No clients are visible to this account yet. Ask your Alttred Miinds
+            contact to assign one.
           </p>
         </div>
       </div>

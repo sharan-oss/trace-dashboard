@@ -5,8 +5,25 @@
  * path is exercised by the live sync in Task 5).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Identity } from "@/lib/auth/session";
 
 const listAdAccounts = vi.fn();
+
+const ADMIN: Identity = {
+  email: "team@alttredmiinds.com",
+  isAdmin: true,
+  isSuper: false,
+  clientId: null,
+};
+// The handlers are called with a bare Request, so there is no request scope for
+// cookies() to read. Only the session read is stubbed — requireAdmin's own
+// logic still runs.
+let identity: Identity | null = ADMIN;
+
+vi.mock("@/lib/auth/session", () => ({
+  getIdentity: async () => identity,
+  hasAccess: (id: Identity) => id.isAdmin || id.clientId !== null,
+}));
 
 vi.mock("@/lib/meta/client", () => ({
   createMetaClient: () => ({ listAdAccounts, listAds: vi.fn(), getAdInsights: vi.fn() }),
@@ -29,6 +46,26 @@ async function importDetailRoute() {
 
 afterEach(() => {
   vi.clearAllMocks();
+  identity = ADMIN;
+});
+
+describe("admin gate", () => {
+  it("refuses a client user", async () => {
+    identity = {
+      email: "buyer@example.com",
+      isAdmin: false,
+      isSuper: false,
+      clientId: CLIENT_ID,
+    };
+    const { GET } = await importRoute();
+    expect((await GET()).status).toBe(403);
+  });
+
+  it("refuses a signed-out caller", async () => {
+    identity = null;
+    const { GET } = await importRoute();
+    expect((await GET()).status).toBe(403);
+  });
 });
 
 describe("GET /api/ads/accounts", () => {

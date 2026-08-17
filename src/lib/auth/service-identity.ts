@@ -1,10 +1,9 @@
 /**
  * Machine identity for the Meta ads sync.
  *
- * Deliberately separate from the Phase 0 dev-identity stub: that stub signs in
- * with a password committed to this repository and is slated for deletion once
- * Phase 2 ships real login, so a scheduled production job must not depend on
- * it. This user exists only to run the sync.
+ * Deliberately separate from the human login path: a scheduled job has no
+ * browser, no cookies and nobody to click a Google button, so it signs in with
+ * its own credentials instead. This user exists only to run the sync.
  *
  * It authenticates with the publishable key like everything else — the
  * service-role key is forbidden inside a request handler — and relies on the
@@ -12,7 +11,7 @@
  * raw_app_meta_data. Writes then pass the new tables' WITH CHECK policies.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { createClientWithJwt } from "@/lib/supabase/server";
+import { createClientWithJwt } from "@/lib/supabase/jwt-client";
 
 const EXPIRY_BUFFER_MS = 60_000;
 

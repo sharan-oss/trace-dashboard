@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Filter, LayoutDashboard, Megaphone, Users } from "lucide-react";
+import { Filter, LayoutDashboard, Megaphone, Users, UserCog } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
@@ -12,12 +12,19 @@ const ITEMS = [
   { href: "/funnel", label: "Funnel", icon: Filter },
 ] as const;
 
-export function SidebarNav() {
+// Client users have no rows visible in app_users, so the page would be an
+// empty table for them — it is hidden rather than shown empty.
+const ADMIN_ITEMS = [
+  { href: "/settings/users", label: "Users", icon: UserCog },
+] as const;
+
+export function SidebarNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+  const items = isAdmin ? [...ITEMS, ...ADMIN_ITEMS] : ITEMS;
 
   return (
     <nav className="flex flex-row gap-1 overflow-x-auto sm:flex-col">
-      {ITEMS.map(({ href, label, icon: Icon }) => {
+      {items.map(({ href, label, icon: Icon }) => {
         const active =
           href === "/" ? pathname === "/" : pathname.startsWith(href);
         return (

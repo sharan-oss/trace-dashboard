@@ -7,11 +7,12 @@
  *        failures isolated per account.
  * POST — manual targeted sync: one account, an explicit day or range.
  *
- * Both authenticated by CRON_SECRET or an admin identity. 409 when a run is
+ * GET is authenticated by CRON_SECRET or an admin identity; POST additionally
+ * lets a client user sync an account their own tenant owns. 409 when a run is
  * already in progress for the targeted account.
  */
 import { z } from "zod";
-import { requireCronOrAdmin } from "@/lib/auth/api-guard";
+import { requireCronOrAdmin, requireCronOrAdminOrOwner } from "@/lib/auth/api-guard";
 
 // A per-account sync (dimension + 28d insights + capped thumbnail mirroring)
 // can outlast Vercel's default function window; 60s is legal on every plan.
@@ -80,10 +81,16 @@ const Body = z
   });
 
 export async function POST(request: Request): Promise<Response> {
-  const denied = await requireCronOrAdmin(request);
+  // Parsed before the guard because the owner path needs the target account,
+  // but authorization still decides the response first: an unparseable body
+  // yields a null id, which only cron or an admin can get past.
+  const parsed = Body.safeParse(await request.json().catch(() => ({})));
+  const denied = await requireCronOrAdminOrOwner(
+    request,
+    parsed.success ? parsed.data.meta_ad_account_id : null
+  );
   if (denied) return denied;
 
-  const parsed = Body.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json(
       { error: "meta_ad_account_id plus date, or date_from and date_to (YYYY-MM-DD)" },

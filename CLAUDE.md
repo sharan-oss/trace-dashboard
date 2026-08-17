@@ -20,7 +20,7 @@ Match Trace's (`sharan-oss/trace`) **current `package.json`** — don't hardcode
 
 ## Auth
 
-Publishable key + RLS only — never the secret/service-role key (see `.claude/rules/auth-security.md`). No real login yet; Phase 0 uses an env-driven dev-identity stub (`src/lib/auth/dev-identity.ts`).
+Publishable key + RLS only — never the secret/service-role key (see `.claude/rules/auth-security.md`). Sign-in is **Google OAuth only** (Phase 2, 2026-08-17). A verified email resolves to JWT claims through the Custom Access Token Hook: a `app_users` super-admin row → `is_admin`+`is_super`, an `@alttredmiinds.com` address → `is_admin` (no row — Google Workspace is the team directory), an `app_users` client row → `client_id`, anything else → no claims and `/no-access`. Cookie sessions via `@supabase/ssr`; `src/proxy.ts` (**Next 16 renamed Middleware → Proxy**) does refresh plus the signed-out redirect as an *optimistic* check, with the real gate re-checked server-side in the dashboard layout and RLS underneath both. The Phase 0 dev-identity stub is gone; the test suite's own sign-in lives in `tests/helpers/supabase.ts`.
 
 ## Data Layer
 

@@ -35,6 +35,9 @@ filtering is a nice-to-have on top, never the only defense.
 ### `ads` — dashboard-owned Meta ad dimension (added 2026-08-09)
 `id, client_id, ad_account_id (nullable until Slice B), meta_ad_id (unique), meta_adset_id, meta_campaign_id, ad_name, adset_name, campaign_name, status, creative_thumbnail_path, creative_source_url, first_seen_at, last_synced_at`. One row per Meta ad with its full campaign → adset → ad hierarchy. Seeded manually for Love School (67 ads) from an Ads Manager export; the Slice B nightly sync later upserts on `meta_ad_id`. Unlike the five core tables this one is dashboard-owned and admin-writable (`WITH CHECK is_admin`).
 
+### `app_users` — who can sign in (added 2026-08-17, Phase 2)
+`id, email (unique, lowercased), role ('super_admin'|'client'), client_id (required when role='client'), invited_by (the adder's email), created_at`. Dashboard-owned and the only user table there is. **Team members deliberately have no rows** — a verified `@alttredmiinds.com` address is the membership test, so don't look here for them. Its RLS *is* the permission matrix (see `.claude/rules/auth-security.md`); read it and render what comes back rather than filtering in the app.
+
 ### Meta hierarchy ids on `sessions` and `payments` (added 2026-08-09)
 Additive nullable text columns `campaign_id, adset_id, ad_id`, values mirroring `ads.meta_*`. Love School's history was backfilled once (ids extracted exactly; ad names resolved only when unique within the row's campaign; hierarchy completed from `ads`; originals untouched byte-for-byte). Null means unresolved OR the row arrived after the backfill — new rows stay null until Trace's capture writes them, so attribution reads `coalesce(stored, extracted)`.
 

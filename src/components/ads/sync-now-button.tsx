@@ -13,9 +13,11 @@ import { nightlyWindow } from "@/lib/meta/nightly";
  * recorded kind='manual' so ad_sync_runs stays honest about what triggered
  * what.
  *
- * Auth happens server-side (requireCronOrAdmin → the Phase 0 dev identity);
- * the browser sends nothing but the same-origin request. A 409 means a run is
- * already in flight for that account — reported as status, never as an error.
+ * Auth happens server-side from the session cookie
+ * (requireCronOrAdminOrOwner); the browser sends nothing but the same-origin
+ * request. Client users get this too, for the accounts their own tenant owns.
+ * A 409 means a run is already in flight for that account — reported as
+ * status, never as an error.
  */
 
 type AccountRef = { meta_ad_account_id: string; name: string };

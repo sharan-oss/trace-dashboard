@@ -1,18 +1,26 @@
 import type * as React from "react";
 import { cookies } from "next/headers";
+import type { Identity } from "@/lib/auth/session";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { getClients } from "@/lib/queries/overview";
 import { createServerClient } from "@/lib/supabase/server";
+import { AccountMenu } from "@/components/account-menu";
 import { ClientSwitcher } from "@/components/client-switcher";
 import { SidebarNav } from "@/components/sidebar-nav";
 
 /**
  * The app frame every route renders inside: left sidebar (nav + client
- * switcher) on desktop, a stacked top bar below `sm`. Fetches the RLS-scoped
- * client list itself so the switcher only ever offers what the caller may
- * see.
+ * switcher + account menu) on desktop, a stacked top bar below `sm`. Fetches
+ * the RLS-scoped client list itself so the switcher only ever offers what the
+ * caller may see.
  */
-export async function AppShell({ children }: { children: React.ReactNode }) {
+export async function AppShell({
+  identity,
+  children,
+}: {
+  identity: Identity;
+  children: React.ReactNode;
+}) {
   // cookies() first: it opts the route out of static prerendering before any
   // network call, so builds never fetch live data with a build-time JWT.
   const cookieStore = await cookies();
@@ -22,6 +30,11 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     clients,
     cookieStore.get(CLIENT_COOKIE)?.value,
   );
+
+  // A client user's RLS-visible list is their own account and nothing else —
+  // a picker with one entry is noise, so it only appears when there is a
+  // genuine choice to make.
+  const showSwitcher = clients.length > 1;
 
   return (
     <div className="flex min-h-screen flex-col sm:flex-row">
@@ -34,9 +47,23 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             dashboard
           </span>
         </div>
-        <SidebarNav />
-        <div className="sm:mt-auto">
-          <ClientSwitcher clients={clients} selectedId={selected?.id ?? null} />
+        <SidebarNav isAdmin={identity.isAdmin} />
+        <div className="flex flex-col gap-4 sm:mt-auto">
+          {showSwitcher ? (
+            <ClientSwitcher clients={clients} selectedId={selected?.id ?? null} />
+          ) : (
+            selected && (
+              <div className="flex flex-col gap-1.5">
+                <p className="px-1 text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                  Client
+                </p>
+                <p className="truncate px-1 text-sm font-medium text-white">
+                  {selected.name}
+                </p>
+              </div>
+            )
+          )}
+          <AccountMenu identity={identity} />
         </div>
       </aside>
       <main className="min-w-0 flex-1 overflow-auto">{children}</main>

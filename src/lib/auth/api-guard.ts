@@ -1,45 +1,60 @@
 /**
- * Admin gate for the /api/ads/* route handlers.
+ * Auth gate for the /api/ads/* route handlers.
  *
- * Phase 0 has no real sessions: the caller's identity IS the server's
- * dev-identity env (DEV_ROLE / DEV_CLIENT_ID), resolved by the same stub the
- * pages use. The guard decodes that JWT and requires the is_admin claim, so a
- * client-identity deployment can never invoke admin endpoints. When Phase 2
- * ships real login, swap getCurrentDevJwt() for the real session here — one
- * place, not per-route.
- *
- * The sync endpoint additionally accepts the CRON_SECRET header, proving a
- * request came from Vercel Cron rather than a browser.
+ * The caller's identity is their own session (see src/lib/auth/session.ts),
+ * verified from the request cookies. The nightly orchestrator has no session at
+ * all and proves itself with CRON_SECRET instead.
  */
-import { getCurrentDevJwt } from "@/lib/auth/dev-identity";
+import { getIdentity } from "@/lib/auth/session";
+import { createServerClient } from "@/lib/supabase/server";
 
-function decodeIsAdmin(jwt: string): boolean {
-  try {
-    const payload = jwt.split(".")[1];
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
-      is_admin?: unknown;
-    };
-    return claims.is_admin === true;
-  } catch {
-    return false;
-  }
+function forbidden(message = "admin only"): Response {
+  return Response.json({ error: message }, { status: 403 });
 }
 
-/** Null when the caller is admin; a 403 Response otherwise. */
-export async function requireAdmin(): Promise<Response | null> {
-  try {
-    const jwt = await getCurrentDevJwt();
-    if (jwt && decodeIsAdmin(jwt)) return null;
-  } catch {
-    // fall through to the 403
-  }
-  return Response.json({ error: "admin only" }, { status: 403 });
-}
-
-/** Null when the request carries the cron secret or the caller is admin. */
-export async function requireCronOrAdmin(request: Request): Promise<Response | null> {
+function isCron(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
   const header = request.headers.get("authorization");
-  if (secret && header === `Bearer ${secret}`) return null;
+  return Boolean(secret) && header === `Bearer ${secret}`;
+}
+
+/** Null when the caller is an admin; a 403 Response otherwise. */
+export async function requireAdmin(): Promise<Response | null> {
+  const identity = await getIdentity();
+  return identity?.isAdmin ? null : forbidden();
+}
+
+/** Null when the request carries the cron secret or the caller is an admin. */
+export async function requireCronOrAdmin(request: Request): Promise<Response | null> {
+  if (isCron(request)) return null;
   return requireAdmin();
+}
+
+/**
+ * As requireCronOrAdmin, plus a third path: a client user triggering a sync of
+ * their own Meta account.
+ *
+ * Ownership is proven by RLS rather than an app-layer client_id comparison —
+ * the caller reads ad_accounts through their own JWT, so an account belonging
+ * to another tenant is simply not there to find. A null id (unparseable body)
+ * can therefore never satisfy the owner path.
+ */
+export async function requireCronOrAdminOrOwner(
+  request: Request,
+  metaAdAccountId: string | null
+): Promise<Response | null> {
+  if (isCron(request)) return null;
+
+  const identity = await getIdentity();
+  if (identity?.isAdmin) return null;
+  if (!identity?.clientId || !metaAdAccountId) return forbidden();
+
+  const db = await createServerClient();
+  const { data } = await db
+    .from("ad_accounts")
+    .select("id")
+    .eq("meta_ad_account_id", metaAdAccountId)
+    .maybeSingle();
+
+  return data ? null : forbidden("not your ad account");
 }

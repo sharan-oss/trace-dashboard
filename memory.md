@@ -1,48 +1,92 @@
 # Memory — Trace Dashboard
 
-Last updated: 2026-08-10 evening (Phase 1 Overview shipped + dark design system v2 shipped)
+Last updated: 2026-08-17 (Phase 2 auth shipped and live; Meta creative pipeline still un-run from the previous session)
 
 ## What was built
 
-**Phase 1 Overview (commit `3fbfcaa`)** — IA settled and approved: one page per decision — Overview `/`, Ads `/ads`, Customers `/customers`, Funnel `/funnel` (last three are stub routes), left sidebar, **single-client view only** with a cookie-backed client switcher. Files: `src/components/{app-shell,sidebar-nav,client-switcher,date-range-picker}.tsx`, `src/components/overview/{kpi-tile,revenue-chart-card,top-ads-table}.tsx`, `src/lib/{format,range,client-selection}.ts`, `src/lib/queries/overview.ts`, `src/app/actions.ts` (cookie server action), rewritten `src/app/page.tsx` (Phase 0 proof page gone; its RLS proof lives in tests). Migration `supabase/migrations/20260810100000_overview_aggregate_rpcs.sql`: three `security invoker` RPCs — `overview_kpis`, `overview_revenue_daily`, `overview_top_ads` — IST day windows (`p_days` null = all time), L1 from `v_payments_attributed` (paid), L2 from `external_payments` (`status='captured'`, dated `coalesce(paid_at, created_at)`), grouped by `ad_key` **including the NULL bucket**, L1/L2 in separate CTEs joined after (fan-out guard). Tests: `tests/{format,client-selection,overview-rpcs}.test.ts` — 163 total green, including SDK-oracle reconciliation, range monotonicity, tenant scoping (other-tenant → zeros, anon → error), and the ad_key-not-ad_name grouping premise.
+**Phase 2 auth — real Google-only login (commit `f978af4`, pushed to `main`).** Tests 340 → **351**. Design spec: `docs/superpowers/specs/2026-08-17-phase-2-auth-design.md`.
 
-**Design system v2 (commit `555e45a`)** — full restyle adopting **Trace's own dark glass admin system 1:1**: slate-950/900 gradient canvas, white/5 glass cards + backdrop blur, white/10 hairlines, indigo-only accent, slate text ladder, zero shadows, dark-only. Done as a token remap in `globals.css` (names unchanged, values only). Sharan's design doc committed verbatim at `docs/design-system/trace-design-system.md` (canonical); dashboard extensions + contrast notes in `docs/superpowers/specs/2026-08-10-visual-design-system-v2-dark.md` (supersedes the 2026-08-08 light spec). Inter and iconsax-react **removed** (Geist-only sans; StatusBadge is now lucide icon + colored text, no pill). `--radius: 0.625rem`. IA/Overview design spec: `docs/superpowers/specs/2026-08-10-dashboard-ia-and-overview-design.md`.
+- **Migration `20260817120000_app_users_and_auth_hook_v2.sql`** — the `app_users` allowlist (`email` unique+lowercased, `role 'super_admin'|'client'`, `client_id`, `invited_by`, `created_at`) plus Custom Access Token Hook v2. Two super-admin rows seeded: `sharanvkt@gmail.com`, `sharan@alttredmiinds.com`.
+- **New app files**: `src/proxy.ts`, `src/lib/auth/session.ts` (`getIdentity`/`hasAccess`), `src/lib/auth/actions.ts` (`signOut`), `src/lib/supabase/jwt-client.ts`, `src/app/(auth)/{layout,login/page,login/google-button,no-access/page}.tsx`, `src/app/auth/callback/route.ts`, `src/app/(dashboard)/settings/users/{page,actions,add-user-form}.tsx`, `src/components/account-menu.tsx`, `tests/app-users-rls.test.ts`.
+- **Rewritten**: `src/lib/supabase/server.ts` (cookie sessions via `@supabase/ssr`), `src/lib/auth/api-guard.ts` (+`requireCronOrAdminOrOwner`), `src/app/(dashboard)/layout.tsx` (the real gate), `src/components/app-shell.tsx`, `sidebar-nav.tsx` (admin-only Users item), `tests/helpers/supabase.ts` (now owns the test sign-in as `getTestJwt`).
+- **Deleted**: `src/lib/auth/dev-identity.ts` and the `DEV_ROLE`/`DEV_CLIENT_ID` env vars.
+- **Deps**: added `@supabase/ssr` ^0.12.4, bumped `@supabase/supabase-js` to ^2.112.3 (ssr peers ^2.111.0).
+- Docs updated: `docs/STATUS.md` (Phase 2 ticked), `CLAUDE.md`, `.claude/rules/auth-security.md`, `.claude/rules/data-model.md`.
 
 ## Decisions made
 
-- **Single-client view only** — no "all clients" mode. Cookie `trace_client_id`, re-resolved every request against the caller's RLS-visible client list (stale/forged cookie can never widen access); default Love School by name. Date range is a URL param `?range=7d|30d|all` (default 30d).
-- **All aggregation in Postgres RPCs** (`security invoker`; `p_client_id` is defense-in-depth, RLS is the guarantee). Never page rows into JS to sum in app code (test oracles may).
-- **L2 dedupe guard in SQL**: exclude `external_payments` rows whose `external_order_id` matches a `payments.order_id` for the same client. Verified a no-op today; stays for backfill safety.
-- **Meta-derived metrics (Spend, CPA, chart Spends/CPA tabs) are locked "Connect Meta" placeholders** — dormant styling, never fake zeros.
-- **Chart hero is L2** (indigo-400 2px, the 1.6× story); L1 is the slate-400 baseline; the table's L2 column is indigo-300. Deliberate emphasis inversion — do NOT "fix" back. Only remaining color question: a >2-series categorical palette.
-- KPI value at `text-4xl` is a recorded dashboard extension of the design doc's `text-xl` "big number".
+- **Google OAuth is the only login method.** No passwords, magic links, or invite emails — adding someone = inserting an allowlist row; they're in the moment they sign in.
+- **Team membership is the email domain, with no rows at all.** A verified `@alttredmiinds.com` address grants `is_admin`. Google Workspace *is* the team directory, so deactivating a mailbox removes dashboard access with no second system to maintain. Rejected "rows for everyone" as YAGNI — revisit only if per-person blocking without touching Workspace is ever needed.
+- **Inviter-scoped management + super admin sees everything.** Team members manage only users where `invited_by` = their own email; super admin manages all. This keeps least privilege *and* fixes the orphan problem that makes pure inviter-based removal a bad pattern (Slack/Notion/Vercel avoid it).
+- **`app_users`' RLS *is* the permission matrix** — insert forces `invited_by` to the caller's own address so the audit trail can't be forged; only a super admin can mint another super admin. The Users page does **no** filtering of its own; it reads the table and renders what comes back.
+- **Claims stay byte-identical to Phase 0's** (`is_admin`, `client_id`), which is why all 11 existing RLS policy sets, every view and every RPC needed **zero** changes. `is_super` is new and read only by `app_users`' policies and the UI.
+- **The hook's `raw_app_meta_data` branch runs first and unconditionally** — that's what keeps the two test users and `ads-sync@trace.local` working. Don't reorder it.
+- **Proxy is an optimistic check only.** Route protection is re-checked server-side in the dashboard layout, and RLS is the real guarantee. Per Next's own guidance.
+- **Client users can trigger Sync now** for their own account; ownership is proven by reading `ad_accounts` through the *caller's* JWT, never an app-layer `client_id` comparison.
+- **Revocation is eventual** (~15 min): deleting a row kills access at the next token refresh. Accepted as inherent to JWT claims.
 
 ## Problems solved
 
-- **Postgres cannot FULL JOIN on `IS NOT DISTINCT FROM`** ("only supported with merge-joinable conditions") — join on `coalesce(key, '__unattributed__')` sentinel equality instead (`overview_top_ads`).
-- **`next build` failed prerendering** because the root-layout AppShell hit Supabase before anything marked routes dynamic. Fix: `await cookies()` FIRST in AppShell. Related: `<main>` must NOT have `bg-background` — an opaque main paints over the body gradient and kills every backdrop-blur.
-- **recharts 3.8 works on React 19 as-is** — the planned `react-is` override was a 2.x-era need, not required.
-- **Playwright harness** (no chromium-cli on this Mac): `playwright-core` installed in the session scratchpad, launched against the cached browser at `~/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`.
-- **Occultyogis' two ₹99 external rows**: `external_order_id` matches NO `payments.order_id` and they carry distinct product names ("Energy Vastu - BRE/GCFB") — likely genuine L2, not re-imports. The SQL guard covers any future provable duplicates.
-- The dark "N" circle overlapping the client switcher in dev screenshots is the **Next.js dev-tools badge**, not our UI.
+**Auth-specific — don't rediscover these:**
+- **Next 16 renamed Middleware → `proxy.ts`.** It lives at `src/proxy.ts` (same level as `src/app`), exports `proxy`, and the build log confirms it as "ƒ Proxy (Middleware)". Bundled docs are at `node_modules/next/dist/docs/`.
+- **Never use `getSession()` in server code** — it doesn't revalidate the token. Use `supabase.auth.getClaims()`, which verifies locally against the project JWKS. `getIdentity()` wraps it in React `cache()` so a layout and its page don't verify twice.
+- **`createClientWithJwt` had to move out of `server.ts`** into `src/lib/supabase/jwt-client.ts` — once `server.ts` imported `next/headers`, the test suite and the sync identity would have pulled it into a Node context and every suite would break.
+- **`tests/api-ads-accounts.test.ts` calls route handlers with a bare `Request`**, so `cookies()` throws outside a request scope. Fixed by mocking `@/lib/auth/session` (not the guard), which keeps `requireAdmin`'s real logic under test; added 403 cases for client-user and signed-out callers.
+- **The Email provider must stay enabled and "Confirm email" must stay on.** Disabling email auth would break the test users and `ads-sync@trace.local`; the hook's `email_confirmed_at` guard is what stops someone self-registering an `@alttredmiinds.com` address they don't own.
+- **Google's consent screen must be "External"**, not Internal — Internal restricts sign-in to the Workspace domain and would lock out every client user. The console is now "Google Auth Platform" (`console.cloud.google.com/auth/*`), not the old APIs & Services consent screen.
+- **`ERR_SSL_PROTOCOL_ERROR` on localhost** = the browser upgraded to `https://localhost:3000` while Next serves http. Fix in Brave: `brave://settings/shields` → Upgrade connections to HTTPS → Off/Standard.
+- **Supabase silently falls back to the Site URL** when a `redirectTo` isn't in the Redirect URLs allow-list. That's what sent a live-domain login to `localhost:3000` with `flow_state_already_used`. Both environments need explicit allow-list entries.
+- A test that attempts a real delete on a bootstrap row and asserts a count the caller can't see **passes either way** — destructive with zero diagnostic power. Rewritten to create its own row and prove a foreign delete removes nothing.
+
+**The Occultyogis sync that ran forever (diagnosed 2026-08-17, killed not fixed):**
+- The nightly cron syncs **every account sequentially inside ONE invocation**, capped at `maxDuration = 60`. Timestamps proved the squeeze: Love School's two accounts finished at 21:44:46 and 21:44:50, so Occultyogis began with ~50s and Vercel killed it mid-run.
+- **A Vercel timeout terminates the process — there is no cleanup hook**, so `runAdAccountSync`'s `catch` (the only thing that closes a run row as `failed`) never runs.
+- That turns a timeout into permanent damage: the concurrency check matches `status = 'running'` with **no age bound**, so one orphan 409s every future sync of the account forever. This is the bug that actually froze Occultyogis, not the timeout itself.
+- Hobby's fluid-compute maximum is **300s** — the `maxDuration = 60` leaves 5× on the table. But 60s was never survivable anyway: 2,540 ads over a 28-day daily-insights walk is 10+ paged calls, and the client's own pacing can sleep up to 300s on a score block.
+- `ad_accounts.status` is read in four places; only `loadActiveAccounts` filters on `'active'`. `'paused'` therefore stops the nightly while leaving manual sync, ownership checks and all UI untouched — `'disconnected'` would also have 422'd manual syncs.
+
+**Carried forward from the previous session (Meta rate limits — still true, still costly):**
+- `thumbnail_width`/`thumbnail_height` are **"Rendered"** — a cold image resize per row, which forces page size to 25 and turns one walk into ~102 calls. `image_hash`/`video_id`/`object_story_spec` are free.
+- The binding limiter is the **ad-account API-level score: 60 points/300s on the dev tier, 1 point per read, and it publishes NO usage header** (`x-app-usage`/`x-ad-account-usage` both read 0% while throttled). Errors: code 17 or 80004, subcode 2446079.
+- **`?ids=` and Graph batch requests are counted per id / per sub-request** — a 50-id call costs 50 points. Both look like optimisations and are traps. Edge *filters* are one call.
+- Editing a CDN URL for a bigger rendition breaks the `oh=` signature (403). Over-requesting size via the API is free.
+- Calling while blocked **extends the block**. Don't probe repeatedly.
 
 ## Current state
 
-`main` pushed through `555e45a`; typecheck, 163 tests, and production build all green; browser-verified at 1440px/375px with zero console errors. All-time Love School through the UI: **L1 ₹46,442 (480 paid) · L2 ₹97,242 (10)** — reconciled exactly against direct SQL.
+`main` pushed through **`f978af4`**. Typecheck clean, **351 tests green**, production build clean.
 
-Still-open data caveats (unchanged from before): `product_name` null on 10/12 external payments (all real Love School L2 revenue — classification blocked); only 12 external rows (partial import 12 Jul–8 Aug, captioned in UI); **the L2 schema (`customers`, `external_payments`, `sync_runs`, `payments.customer_id`, two views) is still in no repo's version control**; Slice B's Meta sync log must be named `ad_sync_runs` (`sync_runs` is taken — recorded in STATUS.md).
+**Auth is live and working.** Verified end to end: `sharan@alttredmiinds.com` signs in via Google and the hook emits `is_admin: true, is_super: true`. Production (`https://trace-dashboard-alpha.vercel.app`) serves the new code — `/` 307s to `/login`, the Google button renders, `/landing` stays public, unauthenticated `POST /api/ads/sync` returns 403. Local sign-in confirmed by Sharan.
+
+**Blocked at the very end of session:** logging in on the **live domain** bounced to `http://localhost:3000/?error=flow_state_already_used`. Diagnosed, not yet confirmed fixed — Supabase's Site URL was still localhost and the production callback was never allow-listed, so Supabase fell back to Site URL. Fix given, awaiting Sharan applying it.
+
+**Occultyogis' Meta sync is switched off** (2026-08-17): `ad_accounts.status` for `act_1468167101279643` set to `'paused'`, and the orphaned run `4e4407db` closed as `failed`. Verified: zero rows stuck in `running`, the nightly now resolves only Love School's two accounts, Occultyogis' 3,193 insight rows intact. 351 tests green, typecheck clean, no source files changed. Sharan's call was to stop the bleeding and design the real fix later.
+
+**Correction to last session's blocker list:** Vercel env is **no longer missing** `META_*`/`SYNC_IDENTITY_*`/`CRON_SECRET` — the nightly ran in production on 2026-08-16 and wrote real run rows, which it could not have done without them. Rotating the Meta token + app secret (pasted in chat 2026-08-10) is still owed.
+
+Live data unchanged from last session:
+
+| | ads | insight rows | creative urls | mirrored |
+|---|---|---|---|---|
+| Love School | 1,233 | 285 | 1,233 | 1,233 |
+| Occultyogis | 2,540 | 3,193 | **0** | **0** |
 
 ## Next session starts with
 
-**Build the Ads page (`/ads`)** — the campaign → ad set → ad expandable hierarchy table (ONE page, three zoom levels, per the IA spec). It inherits design system v2 for free. Will need new aggregate RPC(s) at adset/campaign tiers — same pattern as `overview_top_ads` but grouped by `adset_key`/`campaign_key` from the attributed views; reuse `groupWithUnattributed` + `tierKeyOf` from `src/lib/metrics/attribution.ts`. Spend/ROAS/CPA columns render as locked placeholders until Meta connects.
-
-Quick first check: ask Sharan if the hero tint (`border-indigo-500/30` + `bg-indigo-500/6`) and L2 indigo intensity look right in his browser — both are one-line token/class tweaks.
+1. **Confirm the live-domain login fix landed.** In Supabase → Auth → URL Configuration: Site URL = `https://trace-dashboard-alpha.vercel.app`, and Redirect URLs containing **both** `https://trace-dashboard-alpha.vercel.app/**` and `http://localhost:3000/**`. Test in a fresh private window (a spent flow state reproduces the error regardless of config). Add a Vercel preview wildcard if previews are used.
+2. **Design the real sync-durability fix** (diagnosis is done — see "Problems solved"; nothing is built). Four parts: a **stale-run lease** so an abandoned `running` row self-heals instead of 409ing forever; **deadline-awareness** so a run closes its own row as `failed` rather than being killed silently; **`maxDuration` 60 → 300**; and a **per-account slice** of the budget so one large account cannot starve the rest. Worth considering alongside: the Meta client's score bucket is shared across all accounts in a nightly, but Meta's limiter is per ad account, so Love School's calls currently pace Occultyogis'. Un-pause `act_1468167101279643` once this lands.
+3. **The Occultyogis creative run, never executed** — and it needs `full:true` specifically: all 2,540 ads still have `meta_image_hash`/`meta_video_id` null and the walk is incremental, so a routine sync can never fill them. Check the block cleared with one cheap call, then stop if it hasn't:
+   `GET /act_1468167101279643/advideos?fields=id,picture,format{picture,width,height}&limit=25`
+   If clear, one sync with `full:true` and watch `ad_sync_runs.api_calls` — should be **20–35, not ~100**. That number is the whole point of the rewrite:
+   `POST /api/ads/sync {"meta_ad_account_id":"act_1468167101279643","date_from":"2026-08-16","date_to":"2026-08-16","kind":"manual","full":true,"thumbnail_limit":3000}`
+   Then verify `creative_source_url` → `creative_thumbnail_path` fill in and Love School's 1,233 don't regress.
+4. `cpa()` still returns ₹0 instead of "n/a" for zero-spend clients (MNW, Batra). `cac()` was fixed, `cpa()` wasn't. One-line fix, queued for three sessions now.
 
 ## Open questions
 
-- Backfill the rest of Razorpay history (12 external rows today) — runs through Trace, not this repo.
-- Fix `product_name` capture for Love School or L2 classification can't work for the client that matters.
-- Capture the L2 schema into a migration in whichever repo owns it.
-- Meta App Review chain unchanged: Business Verification → `ads_read` Advanced → System User → per-client grants (Occultyogis first — unlocks names for 2,342 sessions). Seed Occultyogis into `ads` from an Ads Manager export before then.
-- The `#`-fragment capture bug in Trace (5 of ~964 paired rows).
-- Chart categorical palette for >2 series (the only remaining color decision; dark mode is resolved — the app IS dark).
+- **The client-user browser path is unverified** (one client, no switcher, no Users nav, Sync now scoped). It needs a second real Google account — a `+alias` won't work, since Google won't authenticate an address that isn't a real account. The scoping *is* proven at the RLS layer by `tests/app-users-rls.test.ts` against the live DB, which is where it's enforced.
+- Whether `/advideos` pages cheaply with the `format` ladder, and what fraction of the 2,540 Occultyogis ads resolve a poster via `object_story_spec` vs `asset_feed_spec` vs neither. Both blocked before they could be probed. Documented fallback if coverage is poor: a paged `/adcreatives` read (19,606 rows against 2,540 ads — stragglers only).
+- Whether to delete the two `@trace.local` test users and the legacy `raw_app_meta_data` hook branch. Can only happen once the test suite stops signing in as them; the test password is still committed in `tests/helpers/supabase.ts`.
+- Razorpay L2 backfill still partial, so LTV:CAC stays understated.
+- Chart categorical palette for >2 series is the only remaining colour decision.
+- Meta App Review is still only needed for the future self-serve client "Connect Meta" OAuth flow — now unblocked on the auth side, since Phase 2 has shipped.

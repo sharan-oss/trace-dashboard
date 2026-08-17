@@ -45,17 +45,21 @@ afterAll(async () => {
 });
 
 describe("nightly window math", () => {
-  it("spans the requested number of days ending yesterday IST", () => {
+  it("spans the requested number of days ending today IST", () => {
     const { from, to } = nightlyWindow(28);
     expect(from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(to).toBe(istDay(-1));
+    expect(to).toBe(istDay(0));
     const span = (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
-    expect(span).toBe(27);
+    expect(span).toBe(28);
   });
 
-  it("never includes today", () => {
+  // The window ended yesterday until 2026-08-17. Because the KPI RPCs leave
+  // to_day unbounded on the preset path, revenue counted today while spend
+  // could not — inflating every ROAS by a day's spend. This is the guard
+  // against that behaviour creeping back.
+  it("always includes today, so spend can never trail revenue by a day", () => {
     const { to } = nightlyWindow();
-    expect(to < istDay(0)).toBe(true);
+    expect(to).toBe(istDay(0));
   });
 });
 

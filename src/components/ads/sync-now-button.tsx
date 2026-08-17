@@ -8,10 +8,13 @@ import { nightlyWindow } from "@/lib/meta/nightly";
 
 /**
  * Manual sync trigger: every active account of the selected client,
- * sequentially, over the same trailing 28-day IST window the nightly uses —
- * upserts are idempotent, so overlapping the nightly costs nothing. Runs are
- * recorded kind='manual' so ad_sync_runs stays honest about what triggered
- * what.
+ * sequentially, over the same trailing IST window the nightly uses — which
+ * runs through TODAY, so this button is what pulls in spend accrued since the
+ * 2:30 AM cron. (It ended yesterday until 2026-08-17, which meant no amount of
+ * clicking could ever surface today's spend; see nightlyWindow's own note.)
+ * Upserts are idempotent, so overlapping the nightly costs nothing, and
+ * re-syncing the partial current day simply corrects it. Runs are recorded
+ * kind='manual' so ad_sync_runs stays honest about what triggered what.
  *
  * Auth happens server-side from the session cookie
  * (requireCronOrAdminOrOwner); the browser sends nothing but the same-origin

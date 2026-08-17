@@ -24,9 +24,29 @@ export function istDay(offset: number): string {
   return base.toISOString().slice(0, 10);
 }
 
-/** Trailing window ending yesterday IST: [yesterday - (days-1), yesterday]. */
+/**
+ * Trailing window ending TODAY IST: [today - days, today], inclusive.
+ *
+ * It ended yesterday until 2026-08-17, on the reasoning that a day still in
+ * progress is not a real day. That was wrong against the way the KPIs window:
+ * the preset path in `ads_summary` sets from_day and leaves to_day NULL, so
+ * revenue and sessions include today while spend structurally could not. Every
+ * ROAS was inflated and every CPA understated by one day's spend, silently and
+ * on the default view. It surfaced as Love School reading ₹1,49,844 against Ads
+ * Manager's ~₹1,54,000, with no amount of clicking Sync now able to close the
+ * gap — the button takes its window from here too.
+ *
+ * Today's row is therefore partial by design, exactly as Ads Manager's own
+ * figure is, and every later run inside the trailing horizon corrects it.
+ *
+ * `from` stays at today - days rather than shrinking to keep the span at 28:
+ * the trailing window exists to absorb Meta's restatements over its 28-day
+ * mutation horizon, and moving `from` forward would drop the oldest restatable
+ * day to buy nothing. One more day of rows costs no extra API call — the
+ * insights read is already paged.
+ */
 export function nightlyWindow(days: number = NIGHTLY_WINDOW_DAYS): { from: string; to: string } {
-  return { from: istDay(-days), to: istDay(-1) };
+  return { from: istDay(-days), to: istDay(0) };
 }
 
 /** Active, non-fixture accounts eligible for the nightly run. */

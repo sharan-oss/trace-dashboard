@@ -68,15 +68,51 @@ export type NightlyAccountOutcome = {
   detail?: string;
 };
 
+export type NightlyDeps = {
+  db: SupabaseClient;
+  /**
+   * A fresh Meta client (and api_calls counter) per account, bound to that
+   * account's deadline. Per account, deliberately: Meta's score limiter is per
+   * ad account, so a shared client's leaky bucket would make Love School's
+   * calls pace Occultyogis' for no reason — and api_calls on each run row
+   * should mean that run's calls, not the whole night's.
+   */
+  makeMeta: (deadlineAt?: number) => {
+    meta: SyncDeps["meta"];
+    apiCallCount: () => number;
+  };
+  thumbnails?: SyncDeps["thumbnails"];
+  /** Epoch-ms budget for the whole invocation; split across accounts below. */
+  deadlineAt?: number;
+};
+
 export async function runNightlyForAccounts(
-  deps: SyncDeps,
+  deps: NightlyDeps,
   accounts: SyncAccount[],
   window: { from: string; to: string } = nightlyWindow()
 ): Promise<NightlyAccountOutcome[]> {
   const outcomes: NightlyAccountOutcome[] = [];
-  for (const account of accounts) {
+  for (const [i, account] of accounts.entries()) {
+    // Each account gets an equal share of the time REMAINING, so a fast
+    // account donates its slack to the ones after it — and one account's
+    // 300s rate-limit sleep can never consume the whole night.
+    const remaining = accounts.length - i;
+    const accountDeadline =
+      deps.deadlineAt == null
+        ? undefined
+        : Math.min(
+            deps.deadlineAt,
+            Date.now() + Math.floor((deps.deadlineAt - Date.now()) / remaining)
+          );
+    const { meta, apiCallCount } = deps.makeMeta(accountDeadline);
     try {
-      const result = await runAdAccountSync(deps, account, window.from, window.to, "nightly");
+      const result = await runAdAccountSync(
+        { db: deps.db, meta, apiCallCount, thumbnails: deps.thumbnails, deadlineAt: accountDeadline },
+        account,
+        window.from,
+        window.to,
+        "nightly"
+      );
       if (result.conflict) {
         outcomes.push({
           meta_ad_account_id: account.meta_ad_account_id,

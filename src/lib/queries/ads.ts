@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { STALE_RUN_MAX_AGE_MS } from "@/lib/meta/sync";
 import {
   rangeRpcArgs,
   rangeRpcArgsWithL2,
@@ -161,7 +162,15 @@ export async function getAdAccountsSyncStatus(
       status: a.status,
       last_finished_at: newestFinished?.finished_at ?? null,
       last_run_status: newestFinished?.status ?? null,
-      running_now: accountRuns.some((r) => r.status === "running"),
+      // Bounded by the lease age: a 'running' row older than any legal
+      // invocation is an orphan from a killed process, and showing it would
+      // pin "sync in progress" (and disable the Sync button) indefinitely.
+      // The next sync attempt closes such rows; this just refuses to wait.
+      running_now: accountRuns.some(
+        (r) =>
+          r.status === "running" &&
+          Date.now() - Date.parse(r.started_at as string) < STALE_RUN_MAX_AGE_MS,
+      ),
     };
   });
 }

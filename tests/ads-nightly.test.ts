@@ -82,10 +82,14 @@ describe("runNightlyForAccounts — failure isolation", () => {
       listAdVideos: async () => [],
     };
 
-    const outcomes = await runNightlyForAccounts({ db, meta }, fixtures, {
-      from: "2020-01-01",
-      to: "2020-01-02",
-    });
+    const outcomes = await runNightlyForAccounts(
+      { db, makeMeta: () => ({ meta, apiCallCount: () => 0 }) },
+      fixtures,
+      {
+        from: "2020-01-01",
+        to: "2020-01-02",
+      }
+    );
 
     expect(outcomes).toHaveLength(2);
     expect(outcomes[0]).toMatchObject({ meta_ad_account_id: "act_test_nightly_1", outcome: "failed" });
@@ -101,5 +105,44 @@ describe("runNightlyForAccounts — failure isolation", () => {
       .single();
     expect(failedRun?.status).toBe("failed");
     expect(failedRun?.kind).toBe("nightly");
+  });
+});
+
+describe("runNightlyForAccounts — invocation budget", () => {
+  it("an exhausted budget fails accounts honestly, with their run rows closed", async () => {
+    const meta = {
+      listAds: async (): Promise<MetaAd[]> => [],
+      getAdInsights: async (): Promise<MetaInsightRow[]> => [],
+      listAdImages: async () => [],
+      listAdVideos: async () => [],
+    };
+
+    const outcomes = await runNightlyForAccounts(
+      {
+        db,
+        makeMeta: () => ({ meta, apiCallCount: () => 0 }),
+        deadlineAt: Date.now() - 1,
+      },
+      fixtures,
+      { from: "2020-01-01", to: "2020-01-02" }
+    );
+
+    // Every account fails with the budget message — none is left 'running'.
+    expect(outcomes).toHaveLength(2);
+    for (const outcome of outcomes) {
+      expect(outcome.outcome).toBe("failed");
+      expect(outcome.detail).toContain("deadline");
+    }
+    for (const f of fixtures) {
+      const { data: run } = await db
+        .from("ad_sync_runs")
+        .select("status, finished_at")
+        .eq("ad_account_id", f.id)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .single();
+      expect(run?.status).toBe("failed");
+      expect(run?.finished_at).not.toBeNull();
+    }
   });
 });

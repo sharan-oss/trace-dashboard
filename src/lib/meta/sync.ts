@@ -13,6 +13,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MetaClient } from "@/lib/meta/client";
+import { assertBudget } from "@/lib/meta/deadline";
 import { toMinorUnits } from "@/lib/meta/money";
 import { mirrorThumbnails } from "@/lib/meta/thumbnails";
 import type { MetaAd, MetaAdVideo } from "@/lib/meta/types";
@@ -47,6 +48,10 @@ export type SyncDeps = {
   /** When set, mirror creative thumbnails as part of the run (AC-11). Omit to
    * skip — e.g. unit tests that only exercise the spend path. */
   thumbnails?: { limit?: number; fetchImpl?: typeof fetch };
+  /** Epoch-ms invocation budget. Checked at every phase boundary so the run
+   * aborts (and closes its own row) instead of being killed by the platform
+   * mid-phase. The Meta client should carry the same deadline for its sleeps. */
+  deadlineAt?: number;
 };
 
 /**
@@ -115,6 +120,16 @@ function usableAd(ad: MetaAd): ad is MetaAd & {
  */
 const FULL_WALK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * A 'running' row older than this is an orphan, not a run. A Vercel timeout
+ * kills the process outright — no cleanup hook — so the catch below that
+ * closes the row as 'failed' never fires, and without an age bound the
+ * conflict check would 409 the account forever (this wedged Occultyogis on
+ * 2026-08-16). Every legal invocation is capped at maxDuration = 300s, so ten
+ * minutes cannot be a live run.
+ */
+export const STALE_RUN_MAX_AGE_MS = 10 * 60 * 1000;
+
 /** Newest last_synced_at for this account, or null if we hold no ads yet. */
 async function lastDimensionSync(
   db: SupabaseClient,
@@ -142,19 +157,25 @@ export async function runAdAccountSync(
   const { db, meta } = deps;
   const apiCalls = deps.apiCallCount ?? (() => 0);
 
-  // One run at a time per account. Not a transaction — the unique keys make a
-  // lost race merely redundant, not corrupting.
-  const { data: running } = await db
+  // A 'running' row past the lease age is a killed process, not a run: close
+  // any such orphans first, so one timeout can never wedge the account
+  // permanently. All of them, not just the newest — wedges can accumulate.
+  await db
     .from("ad_sync_runs")
-    .select("id")
+    .update({
+      status: "failed",
+      error: "abandoned: the process was killed before it could close this run",
+      finished_at: new Date().toISOString(),
+    })
     .eq("ad_account_id", account.id)
     .eq("status", "running")
-    .limit(1)
-    .maybeSingle();
-  if (running) {
-    return { conflict: true, runningRunId: running.id };
-  }
+    .lt("started_at", new Date(Date.now() - STALE_RUN_MAX_AGE_MS).toISOString());
 
+  // One run at a time per account, enforced by the DB: the partial unique
+  // index ad_sync_runs_one_running_per_account rejects a second 'running' row
+  // outright, so the claim is the insert itself — no SELECT-then-INSERT race
+  // between Sync-now and the cron. A lost race surfaces as 23505 and is
+  // reported as a conflict, never a duplicate run.
   const { data: run, error: runError } = await db
     .from("ad_sync_runs")
     .insert({
@@ -168,6 +189,16 @@ export async function runAdAccountSync(
     .select("id")
     .single();
   if (runError || !run) {
+    if (runError?.code === "23505") {
+      const { data: running } = await db
+        .from("ad_sync_runs")
+        .select("id")
+        .eq("ad_account_id", account.id)
+        .eq("status", "running")
+        .limit(1)
+        .maybeSingle();
+      return { conflict: true, runningRunId: running?.id ?? "unknown" };
+    }
     throw new Error(`could not open ad_sync_runs row: ${runError?.message}`);
   }
 
@@ -181,6 +212,7 @@ export async function runAdAccountSync(
     //    so re-listing 2,540 unchanged ads every run is budget we need for
     //    the spend data. A full walk still happens the first time, and
     //    whenever the caller forces one.
+    assertBudget(deps.deadlineAt);
     const newest = forceFullWalk ? null : await lastDimensionSync(db, account.id);
     // Full walk when we hold nothing, when forced, or once a week so deletions
     // are eventually noticed; incremental the rest of the time.
@@ -258,6 +290,7 @@ export async function runAdAccountSync(
     //    account's own timezone; every mapped account is Asia/Kolkata (the
     //    POST /accounts INR guard keeps it that way), so date_start is already
     //    the IST day and is stored as-is.
+    assertBudget(deps.deadlineAt);
     const insights = await meta.getAdInsights(account.meta_ad_account_id, dateFrom, dateTo);
 
     // 3a. Deleted ads: Meta reports their spend history but refuses to list
@@ -331,6 +364,7 @@ export async function runAdAccountSync(
     //     pictures, never the spend data already written above.
     if (deps.thumbnails) {
       try {
+        assertBudget(deps.deadlineAt);
         const pending: { meta_ad_id: string; meta_image_hash: string | null; meta_video_id: string | null }[] = [];
         const PAGE = 1000;
         for (let from = 0; ; from += PAGE) {
@@ -414,6 +448,7 @@ export async function runAdAccountSync(
         accountId: account.id,
         limit: deps.thumbnails.limit,
         fetchImpl: deps.thumbnails.fetchImpl,
+        deadlineAt: deps.deadlineAt,
       });
     }
 
@@ -433,7 +468,10 @@ export async function runAdAccountSync(
         error: problems.length > 0 ? problems.join("; ") : null,
         finished_at: new Date().toISOString(),
       })
-      .eq("id", run.id);
+      .eq("id", run.id)
+      // Zombie guard: if the stale-run lease already closed this row (this
+      // invocation outlived its lease), leave that verdict alone.
+      .eq("status", "running");
 
     return {
       runId: run.id,
@@ -454,7 +492,8 @@ export async function runAdAccountSync(
         error: (err as Error).message,
         finished_at: new Date().toISOString(),
       })
-      .eq("id", run.id);
+      .eq("id", run.id)
+      .eq("status", "running");
     throw err;
   }
 }

@@ -12,6 +12,7 @@ import {
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { formatCount } from "@/lib/format";
+import { STALE_RUN_MAX_AGE_MS } from "@/lib/meta/sync";
 import { getSyncRuns, type SyncRun } from "@/lib/queries/ads";
 import { getClients } from "@/lib/queries/overview";
 import { createServerClient } from "@/lib/supabase/server";
@@ -45,8 +46,14 @@ function duration(run: SyncRun): string | null {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-function RunStatus({ status }: { status: SyncRun["status"] }) {
+function RunStatus({ status, startedAt }: { status: SyncRun["status"]; startedAt: string }) {
   if (status === "running") {
+    // A 'running' row past the lease age is a killed process, not a run — the
+    // next sync of the account will close it as failed. Rendering it as a
+    // live spinner for days is what made an orphan look like a stuck sync.
+    if (Date.now() - Date.parse(startedAt) > STALE_RUN_MAX_AGE_MS) {
+      return <StatusBadge status="danger" label="Abandoned" />;
+    }
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-400">
         <RefreshCw size={12} aria-hidden="true" className="animate-spin" />
@@ -159,7 +166,7 @@ export default async function SyncLogPage() {
                         {runDuration ?? "—"}
                       </td>
                       <td className="py-2.5 pr-4">
-                        <RunStatus status={run.status} />
+                        <RunStatus status={run.status} startedAt={run.started_at} />
                       </td>
                       <td className="py-2.5 pr-4 text-right tabular-nums">
                         {formatCount(run.rows_upserted)}

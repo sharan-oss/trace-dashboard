@@ -15,6 +15,7 @@
  * testable without a live call or a real delay.
  */
 import { createHmac } from "node:crypto";
+import { assertBudget } from "@/lib/meta/deadline";
 import type {
   MetaAd,
   MetaAdAccount,
@@ -95,6 +96,10 @@ export type MetaClientOptions = {
   /** Score budget per 300s window. Defaults to the development tier's 60.
    * Raise to 9000 once the app holds Full access to the Marketing API. */
   maxScore?: number;
+  /** Epoch-ms invocation budget. Every sleep and every page walk checks it
+   * first and throws DeadlineError rather than outliving the function — a
+   * rate-limit block (300s) must never carry a run past Vercel's kill. */
+  deadlineAt?: number;
 };
 
 export type MetaClient = {
@@ -166,8 +171,16 @@ function peakUsagePercent(header: string | null): number {
 export function createMetaClient(options: MetaClientOptions): MetaClient {
   const { token, apiVersion, appSecret } = options;
   const doFetch = options.fetchImpl ?? globalThis.fetch;
-  const sleep = options.sleepImpl ?? defaultSleep;
+  const rawSleep = options.sleepImpl ?? defaultSleep;
   const maxScore = options.maxScore ?? DEV_TIER_MAX_SCORE;
+  const deadlineAt = options.deadlineAt;
+
+  // Every sleep in this client goes through here: refuse to start one the
+  // budget cannot absorb, so the process is never asleep when Vercel kills it.
+  const sleep = async (ms: number) => {
+    assertBudget(deadlineAt, ms);
+    await rawSleep(ms);
+  };
 
   // Leaky-bucket model of the score limiter: `spent` decays linearly at
   // maxScore per SCORE_DECAY_MS. Paced BEFORE each call, so we wait rather
@@ -260,6 +273,8 @@ export function createMetaClient(options: MetaClientOptions): MetaClient {
     let pages = 0;
 
     while (next != null && pages < maxPages) {
+      // An account's walk has no page bound; the budget is the bound.
+      assertBudget(deadlineAt);
       pages += 1;
       let url: string = next;
       let page: MetaListResponse<T> | undefined;

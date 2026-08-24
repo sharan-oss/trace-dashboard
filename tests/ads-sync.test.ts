@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createSyncClient } from "@/lib/auth/service-identity";
-import { runAdAccountSync, type SyncAccount } from "@/lib/meta/sync";
+import { runAdAccountSync, STALE_RUN_MAX_AGE_MS, type SyncAccount } from "@/lib/meta/sync";
 import type { MetaAd, MetaInsightRow } from "@/lib/meta/types";
 
 const FIXTURE_ACT = "act_test_sync_fixture";
@@ -306,6 +306,68 @@ describe("runAdAccountSync", () => {
 
     await db.from("ad_sync_runs").delete().eq("id", blocker!.id);
   });
+
+  // The lease: a Vercel timeout kills the process with no cleanup hook, so a
+  // wedged 'running' row would 409 the account forever (this froze Occultyogis
+  // on 2026-08-16). A row older than any legal invocation is closed, not obeyed.
+  it("closes a stale running row and proceeds instead of conflicting forever", async () => {
+    const staleStart = new Date(Date.now() - STALE_RUN_MAX_AGE_MS - 60_000).toISOString();
+    const { data: orphan } = await db
+      .from("ad_sync_runs")
+      .insert({
+        ad_account_id: account.id,
+        client_id: account.client_id,
+        kind: "nightly",
+        status: "running",
+        started_at: staleStart,
+      })
+      .select("id")
+      .single();
+
+    const result = await runAdAccountSync(
+      { db, meta: fakeMeta([], []) },
+      account,
+      DATE,
+      DATE
+    );
+    // The new run went ahead — the orphan no longer blocks the account.
+    expect(result.conflict).toBeFalsy();
+
+    const { data: closed } = await db
+      .from("ad_sync_runs")
+      .select("status, error, finished_at")
+      .eq("id", orphan!.id)
+      .single();
+    expect(closed?.status).toBe("failed");
+    expect(closed?.error).toContain("abandoned");
+    expect(closed?.finished_at).not.toBeNull();
+  });
+
+  it("a fresh running row still blocks — the lease never races a live run", async () => {
+    const freshStart = new Date(Date.now() - STALE_RUN_MAX_AGE_MS + 60_000).toISOString();
+    const { data: blocker } = await db
+      .from("ad_sync_runs")
+      .insert({
+        ad_account_id: account.id,
+        client_id: account.client_id,
+        kind: "manual",
+        status: "running",
+        started_at: freshStart,
+      })
+      .select("id")
+      .single();
+
+    const result = await runAdAccountSync(
+      { db, meta: fakeMeta([], []) },
+      account,
+      DATE,
+      DATE
+    );
+    expect(result.conflict).toBe(true);
+    if (result.conflict) expect(result.runningRunId).toBe(blocker!.id);
+
+    await db.from("ad_sync_runs").delete().eq("id", blocker!.id);
+  });
 });
 
 describe("runAdAccountSync — incremental dimension walk", () => {
@@ -384,5 +446,58 @@ describe("runAdAccountSync — incremental dimension walk", () => {
       .eq("meta_ad_id", INC_1)
       .single();
     expect(survivor?.status, "an unchanged ad must not be retired").toBe("active");
+  });
+});
+
+describe("runAdAccountSync — deadline awareness and the atomic claim", () => {
+  // The wedge was never the timeout itself: it was dying without closing the
+  // run row. A sync that knows its budget aborts on its own, closes the row
+  // honestly, and the next idempotent run picks the window back up.
+  it("aborts on an exhausted budget and still closes its own run row", async () => {
+    await expect(
+      runAdAccountSync(
+        { db, meta: fakeMeta([AD_1], [insightRow("test_sync_ad_1", "10")]), deadlineAt: Date.now() - 1 },
+        account,
+        DATE,
+        DATE
+      )
+    ).rejects.toMatchObject({ name: "DeadlineError" });
+
+    const { data: run } = await db
+      .from("ad_sync_runs")
+      .select("status, error, finished_at")
+      .eq("ad_account_id", account.id)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .single();
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toContain("deadline");
+    expect(run?.finished_at).not.toBeNull();
+
+    // The account is not wedged: the very next run (fresh budget) succeeds.
+    const retry = await runAdAccountSync(
+      { db, meta: fakeMeta([AD_1], [insightRow("test_sync_ad_1", "10")]) },
+      account,
+      DATE,
+      DATE
+    );
+    expect(retry.conflict).toBeFalsy();
+  });
+
+  it("the database itself refuses a second running row for one account", async () => {
+    const { data: first } = await db
+      .from("ad_sync_runs")
+      .insert({ ad_account_id: account.id, client_id: account.client_id, kind: "manual", status: "running" })
+      .select("id")
+      .single();
+
+    // The partial unique index is the claim — a duplicate is rejected at the
+    // DB, so no SELECT-then-INSERT race can ever produce two live runs.
+    const { error: duplicate } = await db
+      .from("ad_sync_runs")
+      .insert({ ad_account_id: account.id, client_id: account.client_id, kind: "manual", status: "running" });
+    expect(duplicate?.code).toBe("23505");
+
+    await db.from("ad_sync_runs").delete().eq("id", first!.id);
   });
 });

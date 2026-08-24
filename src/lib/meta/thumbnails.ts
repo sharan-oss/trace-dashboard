@@ -24,6 +24,9 @@ export type MirrorOptions = {
   /** Max mirrors this call; omit for uncapped (the local backfill). */
   limit?: number;
   fetchImpl?: typeof fetch;
+  /** Epoch-ms invocation budget. Mirroring stops (never throws) once past it:
+   * unmirrored ads keep a null path and the next run picks them up. */
+  deadlineAt?: number;
 };
 
 export async function mirrorThumbnails(options: MirrorOptions): Promise<MirrorResult> {
@@ -58,6 +61,7 @@ export async function mirrorThumbnails(options: MirrorOptions): Promise<MirrorRe
   let failed = 0;
 
   for (const ad of pending ?? []) {
+    if (options.deadlineAt != null && Date.now() > options.deadlineAt) break;
     try {
       const response = await doFetch(ad.creative_source_url as string);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

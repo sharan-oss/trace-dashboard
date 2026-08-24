@@ -14,11 +14,15 @@
 import { z } from "zod";
 import { requireCronOrAdmin, requireCronOrAdminOrOwner } from "@/lib/auth/api-guard";
 
-// A per-account sync (dimension + 28d insights + capped thumbnail mirroring)
-// can outlast Vercel's default function window; 60s is legal on every plan.
-export const maxDuration = 60;
+// The nightly GET syncs EVERY account sequentially in this one invocation,
+// and 60s demonstrably could not fit three: on 2026-08-16 Vercel killed the
+// process mid-Occultyogis after Love School's two accounts used ~10s, leaving
+// an orphaned 'running' row that wedged the account (see the stale-run lease
+// in sync.ts). 300s is the Hobby plan's fluid-compute maximum.
+export const maxDuration = 300;
 import { createSyncClient } from "@/lib/auth/service-identity";
 import { createMetaClient, type MetaClient } from "@/lib/meta/client";
+import { invocationDeadline } from "@/lib/meta/deadline";
 import { getMetaConfig } from "@/lib/meta/env";
 import {
   NIGHTLY_THUMBNAIL_CAP,
@@ -27,13 +31,14 @@ import {
 } from "@/lib/meta/nightly";
 import { runAdAccountSync } from "@/lib/meta/sync";
 
-function buildMetaClient(onRequest: () => void): MetaClient {
+function buildMetaClient(onRequest: () => void, deadlineAt?: number): MetaClient {
   const config = getMetaConfig();
   return createMetaClient({
     token: config.token,
     apiVersion: config.apiVersion,
     appSecret: config.appSecret,
     onRequest,
+    deadlineAt,
   });
 }
 
@@ -42,14 +47,24 @@ export async function GET(request: Request): Promise<Response> {
   if (denied) return denied;
 
   const db = await createSyncClient();
-  let apiCalls = 0;
-  const meta = buildMetaClient(() => {
-    apiCalls += 1;
-  });
+  const deadlineAt = invocationDeadline(maxDuration);
 
   const accounts = await loadActiveAccounts(db);
   const outcomes = await runNightlyForAccounts(
-    { db, meta, apiCallCount: () => apiCalls, thumbnails: { limit: NIGHTLY_THUMBNAIL_CAP } },
+    {
+      db,
+      // Fresh client per account: its own score bucket (Meta's limiter is per
+      // ad account) and its own api_calls counter for that account's run row.
+      makeMeta: (accountDeadline) => {
+        let apiCalls = 0;
+        const meta = buildMetaClient(() => {
+          apiCalls += 1;
+        }, accountDeadline);
+        return { meta, apiCallCount: () => apiCalls };
+      },
+      thumbnails: { limit: NIGHTLY_THUMBNAIL_CAP },
+      deadlineAt,
+    },
     accounts
   );
   const failed = outcomes.filter((o) => o.outcome === "failed").length;
@@ -120,10 +135,12 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Account is disconnected" }, { status: 422 });
   }
 
+  // A single targeted sync gets the whole invocation budget.
+  const deadlineAt = invocationDeadline(maxDuration);
   let apiCalls = 0;
   const meta = buildMetaClient(() => {
     apiCalls += 1;
-  });
+  }, deadlineAt);
 
   try {
     const result = await runAdAccountSync(
@@ -132,6 +149,7 @@ export async function POST(request: Request): Promise<Response> {
         meta,
         apiCallCount: () => apiCalls,
         thumbnails: { limit: parsed.data.thumbnail_limit ?? NIGHTLY_THUMBNAIL_CAP },
+        deadlineAt,
       },
       account,
       dateFrom,

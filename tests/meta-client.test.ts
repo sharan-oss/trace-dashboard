@@ -517,3 +517,83 @@ describe("createMetaClient — honours Meta's own recovery estimate", () => {
   });
 });
 
+
+describe("createMetaClient — deadline awareness", () => {
+  /**
+   * A rate-limit block is 300s; Vercel's kill is absolute. A client that goes
+   * to sleep past its invocation budget dies mid-sleep and the sync's catch
+   * never closes the run row — the exact wedge that froze Occultyogis. So
+   * every sleep first proves it can finish inside deadlineAt, and throws
+   * DeadlineError instead of starting one that cannot.
+   */
+  it("refuses a rate-limit block sleep that cannot finish inside the budget", async () => {
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) =>
+      jsonResponse(
+        { error: { message: "blocked", code: 17, error_subcode: 2446079 } },
+        { status: 400 },
+      ),
+    );
+    const sleepImpl = vi.fn(async (_ms: number) => {});
+    const client = createMetaClient({
+      token: "t",
+      apiVersion: API_VERSION,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+      // 10s of budget left — a 300s block sleep can never fit.
+      deadlineAt: Date.now() + 10_000,
+    });
+
+    await expect(client.listAdAccounts()).rejects.toMatchObject({ name: "DeadlineError" });
+    expect(sleepImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a score-governor pacing sleep past the deadline", async () => {
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ data: [] }));
+    const sleepImpl = vi.fn(async (_ms: number) => {});
+    const client = createMetaClient({
+      token: "t",
+      apiVersion: API_VERSION,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl,
+      maxScore: 2,
+      deadlineAt: Date.now() + 1_000,
+    });
+
+    // Two calls exhaust the tiny budget; the third needs a pacing sleep that
+    // cannot fit one second of budget.
+    await client.listAdAccounts();
+    await client.listAdAccounts();
+    await expect(client.listAdAccounts()).rejects.toMatchObject({ name: "DeadlineError" });
+    expect(sleepImpl).not.toHaveBeenCalled();
+  });
+
+  it("stops a page walk once the budget is exhausted", async () => {
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ data: [] }));
+    const client = createMetaClient({
+      token: "t",
+      apiVersion: API_VERSION,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl: vi.fn(async (_ms: number) => {}),
+      deadlineAt: Date.now() - 1,
+    });
+
+    await expect(client.listAdAccounts()).rejects.toMatchObject({ name: "DeadlineError" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("behaves exactly as before when no deadline is configured", async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async (..._args: Parameters<typeof fetch>) => {
+      calls += 1;
+      if (calls === 1) {
+        return jsonResponse({ error: { message: "slow down", code: 613 } }, { status: 400 });
+      }
+      return jsonResponse({ data: [] });
+    });
+    const sleepImpl = vi.fn(async (_ms: number) => {});
+    const { client } = makeClient(fetchImpl as unknown as typeof fetch, sleepImpl);
+
+    await expect(client.listAdAccounts()).resolves.toEqual([]);
+    expect(sleepImpl).toHaveBeenCalledWith(500);
+  });
+});

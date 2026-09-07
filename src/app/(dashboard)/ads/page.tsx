@@ -20,6 +20,7 @@ import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { signCreativePaths } from "@/lib/creatives";
+import { makeAdAccountResolver } from "@/lib/meta/ads-manager";
 import {
   formatCount,
   formatDayRange,
@@ -117,6 +118,7 @@ function mergeCards(
       nameMatched: b?.name_matched ?? false,
       hasTest: b?.has_test ?? false,
       hasActivity: b != null,
+      adAccountId: d.ad_account_id,
     };
   });
   const dimKeys = new Set(dimension.map((d) => d.meta_ad_id));
@@ -141,6 +143,9 @@ function mergeCards(
       nameMatched: b.name_matched,
       hasTest: b.has_test,
       hasActivity: true,
+      // No dimension row, so no owning account. The resolver decides whether
+      // that is answerable; it must not be guessed here.
+      adAccountId: null,
     });
   }
   return cards;
@@ -328,7 +333,7 @@ export default async function AdsPage({
         unattributedL2RevenuePaise={unattributedL2.paise}
         unattributedL2Count={unattributedL2.count}
         l2WindowLabel={l2WindowLabel}
-        metaAdAccountId={accounts[0]?.meta_ad_account_id ?? null}
+        metaAdAccountFor={makeAdAccountResolver(accounts)}
       />
     );
   }

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { adsManagerUrl } from "@/lib/meta/ads-manager";
 
 /**
  * Signed access to the private `ad-creatives` bucket, shared by every surface
@@ -37,11 +38,34 @@ export async function signCreativePaths(
   return out;
 }
 
+/**
+ * The `act_…` id out of an embedded `ad_accounts` row.
+ *
+ * supabase-js types every embed as an array because it cannot tell a to-one
+ * relationship from a to-many, while PostgREST returns a bare object for a
+ * many-to-one FK like `ads.ad_account_id`. Both shapes are accepted rather
+ * than asserting one, since guessing wrong here would silently return no link
+ * at all — and null is the honest answer for an ad the sync has not yet
+ * claimed for an account.
+ */
+function embeddedAccount(value: unknown): string | null {
+  const row = Array.isArray(value) ? value[0] : value;
+  if (row == null || typeof row !== "object") return null;
+  const id = (row as { meta_ad_account_id?: unknown }).meta_ad_account_id;
+  return typeof id === "string" ? id : null;
+}
+
 export type AdCreativeMeta = {
   thumbUrl: string | null;
   adName: string | null;
   campaignName: string | null;
   status: string;
+  /**
+   * Campaign-scoped deep link into Ads Manager, or null when this ad's account
+   * or campaign is unknown — the preview then offers no link rather than one
+   * that dumps the viewer into the account's entire ad list.
+   */
+  adsManagerUrl: string | null;
 };
 
 /**
@@ -60,7 +84,12 @@ export async function getAdCreativeMeta(
 
   const { data, error } = await supabase
     .from("ads")
-    .select("meta_ad_id, ad_name, campaign_name, status, creative_thumbnail_path")
+    // ad_accounts is embedded rather than looked up separately so each ad
+    // resolves its OWN account: a client can have several (Love School has
+    // two) and an Ads Manager link naming the wrong one fails silently.
+    .select(
+      "meta_ad_id, ad_name, campaign_name, status, creative_thumbnail_path, meta_campaign_id, ad_accounts(meta_ad_account_id)",
+    )
     .eq("client_id", clientId)
     .in("meta_ad_id", keys);
   if (error) throw new Error(`ads creative read failed: ${error.message}`);
@@ -74,11 +103,17 @@ export async function getAdCreativeMeta(
   const out = new Map<string, AdCreativeMeta>();
   for (const r of rows) {
     const path = r.creative_thumbnail_path as string | null;
+    const account = embeddedAccount(r.ad_accounts);
     out.set(r.meta_ad_id as string, {
       thumbUrl: path != null ? (signed.get(path) ?? null) : null,
       adName: (r.ad_name as string | null) ?? null,
       campaignName: (r.campaign_name as string | null) ?? null,
       status: r.status as string,
+      adsManagerUrl: adsManagerUrl(
+        account,
+        r.meta_ad_id as string,
+        r.meta_campaign_id as string | null,
+      ),
     });
   }
   return out;

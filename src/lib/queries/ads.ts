@@ -238,6 +238,12 @@ export type AdDimensionRow = {
   campaign_name: string | null;
   status: string;
   creative_thumbnail_path: string | null;
+  /**
+   * ad_accounts.id — which of the client's accounts owns this ad. Needed to
+   * build an Ads Manager link that actually resolves: a client can have several
+   * accounts and an `act=` that does not own the ad fails silently.
+   */
+  ad_account_id: string | null;
 };
 
 /**
@@ -256,7 +262,7 @@ export async function getAdsDimension(
     const { data, error } = await supabase
       .from("ads")
       .select(
-        "meta_ad_id, meta_adset_id, meta_campaign_id, ad_name, adset_name, campaign_name, status, creative_thumbnail_path",
+        "meta_ad_id, meta_adset_id, meta_campaign_id, ad_name, adset_name, campaign_name, status, creative_thumbnail_path, ad_account_id",
       )
       .eq("client_id", clientId)
       .order("meta_ad_id")

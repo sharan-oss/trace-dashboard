@@ -32,6 +32,11 @@ export type AdCardData = {
   hasTest: boolean;
   /** Appeared in the breakdown for this range (spend, revenue or sessions). */
   hasActivity: boolean;
+  /**
+   * ad_accounts.id owning this ad, resolved to an `act_…` by the caller. Null
+   * on breakdown-only cards, which have no dimension row to read it from.
+   */
+  adAccountId: string | null;
 };
 
 /** Collapse Meta's status zoo into the three states a buyer acts on. */
@@ -68,11 +73,16 @@ function Metric({
 
 export function AdCard({
   ad,
-  metaAdAccountId = null,
+  metaAdAccountFor,
 }: {
   ad: AdCardData;
-  /** Enables the Ads Manager link; null just hides it. */
-  metaAdAccountId?: string | null;
+  /**
+   * Resolves this ad's own account uuid to its `act_…` id. Per-ad, not a single
+   * account for the page: a client can have several, and a link naming the
+   * wrong one fails silently. Returning null just hides the link, which is the
+   * right answer when ownership is unknown.
+   */
+  metaAdAccountFor?: (adAccountId: string | null) => string | null;
 }) {
   const totalRevenue = ad.l1RevenuePaise + ad.l2RevenuePaise;
   const roasValue = roas(totalRevenue, ad.spendPaise);
@@ -81,7 +91,11 @@ export function AdCard({
   const cpmValue = cpm(ad.spendPaise, ad.impressions);
   const group = statusGroup(ad.status);
   const name = ad.adName ?? ad.adKey;
-  const metaUrl = adsManagerUrl(metaAdAccountId, ad.adKey);
+  const metaUrl = adsManagerUrl(
+    metaAdAccountFor?.(ad.adAccountId) ?? null,
+    ad.adKey,
+    ad.campaignKey,
+  );
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md transition-colors hover:border-white/20">

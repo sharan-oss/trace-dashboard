@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { DayDetailSheet } from "@/components/overview/day-detail-sheet";
 import { KpiTile } from "@/components/overview/kpi-tile";
 import { RevenueChartCard } from "@/components/overview/revenue-chart-card";
 import { TopAdsTable } from "@/components/overview/top-ads-table";
@@ -28,16 +29,23 @@ import {
 } from "@/lib/metrics/definitions";
 import { getAdsSummary, getSpendDaily } from "@/lib/queries/ads";
 import {
+  DAY_PAYMENTS_LIMIT,
   chartSpan,
   fillDailyGaps,
   getClients,
+  getDayPayments,
   getOverviewKpis,
   getRevenueDaily,
   getTopAds,
   hasExternalPayments,
   istToday,
+  rangeStartDay,
 } from "@/lib/queries/overview";
-import { parseRangeState, type RangeSearchParams } from "@/lib/range";
+import {
+  parseDayParam,
+  parseRangeState,
+  type RangeSearchParams,
+} from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +55,9 @@ export default async function OverviewPage({
 }: {
   searchParams: Promise<RangeSearchParams>;
 }) {
-  const state = parseRangeState(await searchParams);
+  const params = await searchParams;
+  const state = parseRangeState(params);
+  const day = parseDayParam(params.day);
 
   const supabase = await createServerClient();
   const clients = await getClients(supabase);
@@ -72,14 +82,18 @@ export default async function OverviewPage({
     );
   }
 
-  const [kpis, daily, ads, adsSummary, spendDaily, hasL2] = await Promise.all([
-    getOverviewKpis(supabase, selected.id, state),
-    getRevenueDaily(supabase, selected.id, state),
-    getTopAds(supabase, selected.id, state),
-    getAdsSummary(supabase, selected.id, state),
-    getSpendDaily(supabase, selected.id, state),
-    hasExternalPayments(supabase, selected.id),
-  ]);
+  const [kpis, daily, ads, adsSummary, spendDaily, hasL2, dayRows] =
+    await Promise.all([
+      getOverviewKpis(supabase, selected.id, state),
+      getRevenueDaily(supabase, selected.id, state),
+      getTopAds(supabase, selected.id, state),
+      getAdsSummary(supabase, selected.id, state),
+      getSpendDaily(supabase, selected.id, state),
+      hasExternalPayments(supabase, selected.id),
+      day != null
+        ? getDayPayments(supabase, selected.id, day, state)
+        : Promise.resolve(null),
+    ]);
   const cpaValue = cpa(adsSummary.spend_paise, kpis.l1_paid_count);
 
   // In split mode the L2 window is stamped onto every surface that shows L2,
@@ -170,6 +184,31 @@ export default async function OverviewPage({
       <RevenueChartCard data={chartData} l2WindowLabel={l2WindowLabel} />
 
       <TopAdsTable rows={ads} l2WindowLabel={l2WindowLabel} />
+
+      {day != null && dayRows != null && (
+        <DayDetailSheet
+          day={day}
+          // The graph's own point, so the header cannot contradict the chart.
+          // A hand-typed day outside the span still opens, reading zero.
+          totals={
+            chartData.find((r) => r.day === day) ?? {
+              day,
+              l1_revenue_paise: 0,
+              l2_revenue_paise: 0,
+            }
+          }
+          rows={dayRows}
+          // The L1 window as selected, NOT chartSpan — in split mode the span
+          // is the union of both windows and reaches earlier than the range.
+          l1Window={
+            state.l1.kind === "custom"
+              ? { from: state.l1.from, to: state.l1.to }
+              : { from: rangeStartDay(state.l1.preset, today), to: null }
+          }
+          l2Window={state.l2}
+          truncated={dayRows.length >= DAY_PAYMENTS_LIMIT}
+        />
+      )}
     </div>
   );
 }

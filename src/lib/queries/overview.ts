@@ -42,16 +42,23 @@ export type TopAdRow = {
 
 export type ClientRow = { id: string; name: string };
 
-/** All three Overview aggregates carry an L2 arm, so all three take the L2 window. */
+/**
+ * All three Overview aggregates carry an L2 arm, so all three take the L2
+ * window. `extra` exists for the day drill-down, which takes the identical
+ * window arguments plus p_day — that shared argument shape is what makes its
+ * rows a strict narrowing of the graph's own input set.
+ */
 async function rpcRows<T>(
   supabase: SupabaseClient,
   fn: string,
   clientId: string,
   state: RangeState,
+  extra: Record<string, unknown> = {},
 ): Promise<T[]> {
   const { data, error } = await supabase.rpc(fn, {
     p_client_id: clientId,
     ...rangeRpcArgsWithL2(state),
+    ...extra,
   });
   if (error) throw new Error(`${fn} failed: ${error.message}`);
   return (data ?? []) as T[];
@@ -88,6 +95,57 @@ export async function getTopAds(
   state: RangeState,
 ): Promise<TopAdRow[]> {
   return rpcRows<TopAdRow>(supabase, "overview_top_ads", clientId, state);
+}
+
+export type DayPaymentArm = "l1" | "l2";
+
+export type DayPaymentRow = {
+  arm: DayPaymentArm;
+  /** payments.id for an L1 row, external_payments.id for an L2 row. */
+  row_id: string;
+  paid_at: string;
+  amount: number;
+  /** Null on L1 rows the identity spine has not linked yet — they still count. */
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+  product_name: string | null;
+  source: string;
+  ad_key: string | null;
+  ad_name: string | null;
+  campaign_name: string | null;
+  /**
+   * customers.first_paid_at in IST — the day Customers -> People buckets this
+   * person on. An L2 row whose acquired day is before the range start is
+   * exactly the row People omits and this drill-down shows.
+   */
+  acquired_day_ist: string | null;
+  has_test: boolean;
+};
+
+/**
+ * Every payment behind one point on the revenue graph, scoped by PAYMENT DAY.
+ *
+ * Deliberately not the Customers cohort read: People filters on
+ * `acquired_day_ist` and so cannot list the day's upsells by people acquired
+ * earlier — which is the discrepancy this exists to explain. See the migration
+ * header in 20260906090000_overview_day_payments.sql.
+ */
+export const DAY_PAYMENTS_LIMIT = 500;
+
+export async function getDayPayments(
+  supabase: SupabaseClient,
+  clientId: string,
+  day: string,
+  state: RangeState,
+): Promise<DayPaymentRow[]> {
+  return rpcRows<DayPaymentRow>(
+    supabase,
+    "overview_day_payments",
+    clientId,
+    state,
+    { p_day: day, p_limit: DAY_PAYMENTS_LIMIT },
+  );
 }
 
 /**

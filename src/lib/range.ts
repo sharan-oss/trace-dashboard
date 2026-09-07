@@ -77,6 +77,8 @@ export type RangeSearchParams = {
   to?: string | string[];
   l2from?: string | string[];
   l2to?: string | string[];
+  /** Overview's day drill-down (`?day=YYYY-MM-DD`). Not part of RangeState. */
+  day?: string | string[];
 };
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -95,6 +97,17 @@ function parseDay(value: string | undefined): string | null {
   const t = Date.parse(`${value}T00:00:00Z`);
   if (Number.isNaN(t)) return null;
   return new Date(t).toISOString().slice(0, 10) === value ? value : null;
+}
+
+/**
+ * A single day from a search param — Overview's `?day=`. Deliberately the same
+ * parseDay() the window bounds use, so "2026-02-31" is rejected rather than
+ * rolled into March here too (reject-to-default, never repair).
+ */
+export function parseDayParam(
+  value: string | string[] | undefined,
+): string | null {
+  return parseDay(first(value));
 }
 
 /** Both bounds present, real, and ordered — otherwise no window at all. */

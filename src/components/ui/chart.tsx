@@ -130,6 +130,7 @@ function ChartTooltipContent({
   color,
   nameKey,
   labelKey,
+  footer,
 }: React.ComponentProps<typeof RechartsPrimitive.Tooltip> &
   React.ComponentProps<"div"> & {
     hideLabel?: boolean
@@ -137,6 +138,8 @@ function ChartTooltipContent({
     indicator?: "line" | "dot" | "dashed"
     nameKey?: string
     labelKey?: string
+    /** Rendered inside the tooltip below a divider — e.g. a "click for detail" hint. */
+    footer?: React.ReactNode
   } & Omit<
     RechartsPrimitive.DefaultTooltipContentProps<
       TooltipValueType,
@@ -266,6 +269,9 @@ function ChartTooltipContent({
             )
           })}
       </div>
+      {footer != null && (
+        <div className="mt-0.5 border-t border-border pt-1.5">{footer}</div>
+      )}
     </div>
   )
 }

@@ -238,6 +238,8 @@ export type TimelineEntry = {
   amount: number;
   paid_at: string;
   product_name: string | null;
+  /** raw_payload->>'method' on external rows, null on trace rows. */
+  payment_method: string | null;
 };
 
 export type CustomerContext = {
@@ -279,7 +281,7 @@ export async function getCustomerDetail(
 
   const { data: timeline, error: tErr } = await supabase
     .from("customer_payments_unified")
-    .select("origin, source, amount, paid_at, product_name")
+    .select("origin, source, amount, paid_at, product_name, payment_method")
     .eq("customer_id", customerId)
     .order("paid_at", { ascending: true });
   if (tErr) throw new Error(`customer timeline read failed: ${tErr.message}`);

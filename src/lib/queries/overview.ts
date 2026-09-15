@@ -121,6 +121,12 @@ export type DayPaymentRow = {
    */
   acquired_day_ist: string | null;
   has_test: boolean;
+  /**
+   * external_payments.raw_payload->>'method' on L2 rows ('gpay' on hand-
+   * recorded ones, the gateway's slug on synced ones); always null on L1.
+   * Rendered through paymentOrigin() in src/lib/payment-origin.ts.
+   */
+  payment_method: string | null;
 };
 
 /**

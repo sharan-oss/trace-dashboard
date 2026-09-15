@@ -7,6 +7,7 @@ import { AdPeek } from "@/components/customers/ad-peek";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { avatarDataUri } from "@/lib/avatars";
 import type { AdCreativeMeta } from "@/lib/creatives";
+import { paymentOrigin } from "@/lib/payment-origin";
 import {
   formatCount,
   formatDays,
@@ -25,10 +26,11 @@ import type { CustomerDetail } from "@/lib/queries/customers";
  * right). Esc and backdrop close it by clearing the URL param — the dialog has
  * no state of its own.
  *
- * The timeline's job is credibility, so it labels each row's origin: "Trace
- * checkout" rows were captured first-party; "Payment link" rows arrived
- * through the gateway sync and were matched to this person by the identity
- * spine. A null product renders "—", never a guess — that gap is real and
+ * The timeline's job is credibility, so it labels each row's origin via
+ * paymentOrigin(): "Trace checkout" rows were captured first-party; "Payment
+ * link" rows arrived through the gateway sync and were matched to this person
+ * by the identity spine; hand-recorded rows name the method ("GPay · recorded
+ * by hand"). A null product renders "—", never a guess — that gap is real and
  * belongs to upstream capture.
  */
 export function CustomerSheet({
@@ -125,66 +127,69 @@ export function CustomerSheet({
               Purchases
             </h3>
             <ol className="mt-3 space-y-0">
-              {timeline.map((entry, i) => (
-                <li
-                  key={`${entry.paid_at}-${i}`}
-                  className="flex items-baseline justify-between gap-3 border-b border-white/5 py-2.5 last:border-0"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm text-white">
-                      {entry.product_name ?? (
-                        <span
-                          className="text-slate-500"
-                          title="Product name not captured for this payment"
-                        >
-                          —
-                        </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
-                      <span className="tabular-nums">
-                        {new Date(entry.paid_at).toLocaleDateString("en-GB", {
-                          timeZone: "Asia/Kolkata",
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </span>
-                      <span
-                        className={
-                          entry.origin === "external"
-                            ? "rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-px text-indigo-300"
-                            : "rounded border border-white/10 bg-white/5 px-1.5 py-px text-slate-400"
-                        }
-                        title={
-                          entry.origin === "external"
-                            ? "Paid outside Trace's checkout (e.g. a payment link), matched to this customer by email/phone"
-                            : "Paid through Trace's checkout"
-                        }
-                      >
-                        {entry.origin === "external" ? "Payment link" : "Trace checkout"}
-                      </span>
-                      {i === 0 &&
-                        (customer.ad_key != null || customer.ad_name != null) && (
-                          <span className="text-slate-500">
-                            via{" "}
-                            <AdPeek
-                              label={customer.ad_name ?? customer.ad_key ?? ""}
-                              meta={
-                                customer.ad_key != null
-                                  ? (creativeMeta[customer.ad_key] ?? null)
-                                  : null
-                              }
-                            />
+              {timeline.map((entry, i) => {
+                const origin = paymentOrigin({
+                  external: entry.origin === "external",
+                  source: entry.source,
+                  method: entry.payment_method,
+                });
+                return (
+                  <li
+                    key={`${entry.paid_at}-${i}`}
+                    className="flex items-baseline justify-between gap-3 border-b border-white/5 py-2.5 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-white">
+                        {entry.product_name ?? (
+                          <span
+                            className="text-slate-500"
+                            title="Product name not captured for this payment"
+                          >
+                            —
                           </span>
                         )}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                        <span className="tabular-nums">
+                          {new Date(entry.paid_at).toLocaleDateString("en-GB", {
+                            timeZone: "Asia/Kolkata",
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </span>
+                        <span
+                          className={
+                            entry.origin === "external"
+                              ? "rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-px text-indigo-300"
+                              : "rounded border border-white/10 bg-white/5 px-1.5 py-px text-slate-400"
+                          }
+                          title={origin.title}
+                        >
+                          {origin.label}
+                        </span>
+                        {i === 0 &&
+                          (customer.ad_key != null || customer.ad_name != null) && (
+                            <span className="text-slate-500">
+                              via{" "}
+                              <AdPeek
+                                label={customer.ad_name ?? customer.ad_key ?? ""}
+                                meta={
+                                  customer.ad_key != null
+                                    ? (creativeMeta[customer.ad_key] ?? null)
+                                    : null
+                                }
+                              />
+                            </span>
+                          )}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-white tabular-nums">
+                      {formatINR(entry.amount)}
                     </p>
-                  </div>
-                  <p className="shrink-0 text-sm font-semibold text-white tabular-nums">
-                    {formatINR(entry.amount)}
-                  </p>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
               {timeline.length === 0 && (
                 <li className="py-3 text-sm text-slate-500">
                   No purchases visible for this customer.

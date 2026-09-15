@@ -267,6 +267,37 @@ describe("overview_day_payments — predicates", () => {
       if (prev.arm === cur.arm) expect(prev.amount).toBeGreaterThanOrEqual(cur.amount);
     }
   });
+
+  it("exposes payment_method: raw_payload->>'method' on L2 rows, null on L1", async () => {
+    // 2026-09-15: the day sheet names how a hand-recorded upsell was paid
+    // ("GPay · recorded by hand"). Catches: the column missing from the RPC
+    // (undefined), an L1 arm leaking a gateway method, or a manual row whose
+    // method was never recorded — every manual row so far carries one.
+    const admin = await adminClient();
+    const ls = await loveSchoolId(admin);
+    const { data: manual } = await admin
+      .from("external_payments")
+      .select("id, paid_at, created_at, raw_payload")
+      .eq("client_id", ls)
+      .eq("source", "manual")
+      .eq("status", "captured")
+      .limit(1);
+    const sample = manual?.[0];
+    if (sample == null) return;
+
+    const ist = new Date(sample.paid_at ?? sample.created_at).toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+    const rows = await getDayPayments(admin, ls, ist, presetState("all"));
+    expect(rows.every((r) => "payment_method" in r)).toBe(true);
+    expect(rows.filter((r) => r.arm === "l1").every((r) => r.payment_method === null)).toBe(true);
+    const row = rows.find((r) => r.row_id === sample.id);
+    expect(row?.source).toBe("manual");
+    expect(row?.payment_method).toBe(
+      (sample.raw_payload as { method?: string } | null)?.method ?? null,
+    );
+    expect(row?.payment_method).toBeTruthy();
+  });
 });
 
 describe("overview_day_payments — deliberately disagrees with Customers → People", () => {

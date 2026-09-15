@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCount, formatDayRange, formatDayShort, formatINR } from "@/lib/format";
+import { paymentOrigin } from "@/lib/payment-origin";
 import type { DayPaymentRow, RevenueDailyRow } from "@/lib/queries/overview";
 import type { DateWindow } from "@/lib/range";
 import { cn } from "@/lib/utils";
@@ -33,26 +34,6 @@ const time = new Intl.DateTimeFormat("en-GB", {
   minute: "2-digit",
 });
 
-/** Gateway/source slug → what actually happened, in the user's words. */
-function originLabel(row: DayPaymentRow): string {
-  if (row.arm === "l1") return "Trace checkout";
-  switch (row.source) {
-    case "manual":
-      return "Recorded by hand";
-    case "tagmango":
-      return "TagMango";
-    default:
-      return "Payment link";
-  }
-}
-
-function originTitle(row: DayPaymentRow): string {
-  if (row.arm === "l1") return "Paid through Trace's checkout";
-  return row.source === "manual"
-    ? "Paid off-platform and entered by hand"
-    : "Paid outside Trace's checkout, matched to this person by email or phone";
-}
-
 function PaymentRow({
   row,
   day,
@@ -65,6 +46,7 @@ function PaymentRow({
   earlyThan: string | null;
 }) {
   const isL2 = row.arm === "l2";
+  const origin = paymentOrigin({ external: isL2, source: row.source, method: row.payment_method });
   const early =
     earlyThan != null &&
     row.acquired_day_ist != null &&
@@ -95,7 +77,7 @@ function PaymentRow({
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
           <span className="tabular-nums">{time.format(new Date(row.paid_at))}</span>
           <span
-            title={originTitle(row)}
+            title={origin.title}
             className={cn(
               "rounded border px-1.5 py-px",
               isL2
@@ -103,7 +85,7 @@ function PaymentRow({
                 : "border-white/10 bg-white/5 text-slate-400",
             )}
           >
-            {originLabel(row)}
+            {origin.label}
           </span>
           <span className="truncate">
             {row.ad_name ?? row.ad_key ?? (

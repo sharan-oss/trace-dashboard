@@ -63,3 +63,24 @@ export function makeAdAccountResolver(
   return (adAccountId) =>
     adAccountId == null ? only : (byId.get(adAccountId) ?? only);
 }
+
+/**
+ * Stamps each card with its resolved Ads Manager link, as a plain string.
+ *
+ * Runs on the server, before the cards cross into the "use client" AdCards
+ * tree. It has to be data by then: React cannot serialise a function across
+ * that boundary, and handing the resolver itself to the client component is
+ * what took the Ads tab down on 2026-09-17 (digest 1322814779).
+ */
+export function withAdsManagerLinks<
+  T extends { adKey: string; campaignKey: string | null; adAccountId: string | null },
+>(
+  cards: ReadonlyArray<T>,
+  accounts: ReadonlyArray<{ id: string; meta_ad_account_id: string }>,
+): Array<T & { adsManagerUrl: string | null }> {
+  const resolve = makeAdAccountResolver(accounts);
+  return cards.map((card) => ({
+    ...card,
+    adsManagerUrl: adsManagerUrl(resolve(card.adAccountId), card.adKey, card.campaignKey),
+  }));
+}

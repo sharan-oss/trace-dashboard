@@ -20,7 +20,7 @@ import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { signCreativePaths } from "@/lib/creatives";
-import { makeAdAccountResolver } from "@/lib/meta/ads-manager";
+import { withAdsManagerLinks } from "@/lib/meta/ads-manager";
 import {
   formatCount,
   formatDayRange,
@@ -88,16 +88,19 @@ async function signThumbnails(
  * One card per ad: the dimension provides identity (every ad, including
  * paused/zero-activity ones), the breakdown provides in-range numbers. A
  * breakdown ad the dimension somehow lacks still gets a card — data is never
- * silently dropped.
+ * silently dropped. The Ads Manager link is added afterwards by
+ * withAdsManagerLinks, once the accounts are known.
  */
+type UnlinkedCard = Omit<AdCardData, "adsManagerUrl">;
+
 function mergeCards(
   dimension: AdDimensionRow[],
   breakdown: AdsBreakdownRow[],
   thumbnails: Map<string, string>,
-): AdCardData[] {
+): UnlinkedCard[] {
   const adRows = breakdown.filter((r) => r.tier === "ad" && r.ad_key != null);
   const byKey = new Map(adRows.map((r) => [r.ad_key as string, r]));
-  const cards: AdCardData[] = dimension.map((d) => {
+  const cards: UnlinkedCard[] = dimension.map((d) => {
     const b = byKey.get(d.meta_ad_id);
     return {
       adKey: d.meta_ad_id,
@@ -302,7 +305,12 @@ export default async function AdsPage({
   } else {
     const dimension = await getAdsDimension(supabase, selected.id);
     const thumbnails = await signThumbnails(supabase, dimension);
-    const cards = mergeCards(dimension, breakdown, thumbnails);
+    // Links resolve here, on the server: AdCards is a client component and a
+    // resolver function cannot cross that boundary (see withAdsManagerLinks).
+    const cards = withAdsManagerLinks(
+      mergeCards(dimension, breakdown, thumbnails),
+      accounts,
+    );
     const campaignNames = new Map<string, string>();
     for (const c of cards) {
       if (c.campaignKey != null && !campaignNames.has(c.campaignKey)) {
@@ -333,7 +341,6 @@ export default async function AdsPage({
         unattributedL2RevenuePaise={unattributedL2.paise}
         unattributedL2Count={unattributedL2.count}
         l2WindowLabel={l2WindowLabel}
-        metaAdAccountFor={makeAdAccountResolver(accounts)}
       />
     );
   }

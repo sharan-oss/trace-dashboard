@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { adsManagerUrl, makeAdAccountResolver } from "@/lib/meta/ads-manager";
+import {
+  adsManagerUrl,
+  makeAdAccountResolver,
+  withAdsManagerLinks,
+} from "@/lib/meta/ads-manager";
 
 describe("adsManagerUrl", () => {
   it("strips the act_ prefix Ads Manager does not want", () => {
@@ -108,5 +112,47 @@ describe("makeAdAccountResolver", () => {
         "&selected_campaign_ids=120246869906490005" +
         "&selected_ad_ids=120246869906520005",
     );
+  });
+});
+
+describe("withAdsManagerLinks", () => {
+  const ALTTRED = { id: "acc-uuid-1", meta_ad_account_id: "act_1052790390047154" };
+  const V2 = { id: "acc-uuid-2", meta_ad_account_id: "act_1312705356631852" };
+
+  it("stamps each card with a plain string link, resolved on the server", () => {
+    // Regression for the 2026-09-17 Ads-tab crash (digest 1322814779): the
+    // page handed a resolver *function* to the "use client" AdCards, and React
+    // cannot serialise a function across the server → client boundary. The
+    // link has to be computed here and travel as data.
+    const cards = withAdsManagerLinks(
+      [
+        { adKey: "120246869906520005", campaignKey: "120246869906490005", adAccountId: V2.id },
+        { adKey: "222", campaignKey: null, adAccountId: ALTTRED.id },
+        { adKey: "333", campaignKey: "111", adAccountId: null },
+      ],
+      [ALTTRED, V2],
+    );
+    for (const c of cards) {
+      expect(["string", "object"]).toContain(typeof c.adsManagerUrl); // string | null
+    }
+    expect(JSON.parse(JSON.stringify(cards))).toEqual(cards);
+    expect(cards[0].adsManagerUrl).toBe(
+      "https://adsmanager.facebook.com/adsmanager/manage/ads" +
+        "?act=1312705356631852" +
+        "&selected_campaign_ids=120246869906490005" +
+        "&selected_ad_ids=120246869906520005",
+    );
+    expect(cards[1].adsManagerUrl).toContain("act=1052790390047154");
+    // Unknown owner with several accounts: no guess, no link.
+    expect(cards[2].adsManagerUrl).toBeNull();
+  });
+
+  it("keeps every other card field untouched", () => {
+    const [card] = withAdsManagerLinks(
+      [{ adKey: "1", campaignKey: null, adAccountId: null, spendPaise: 42 }],
+      [ALTTRED],
+    );
+    expect(card.spendPaise).toBe(42);
+    expect(card.adsManagerUrl).toContain("act=1052790390047154");
   });
 });

@@ -1,7 +1,6 @@
 import { ExternalLink, ImageOff } from "lucide-react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCount, formatINR, formatPercent } from "@/lib/format";
-import { adsManagerUrl } from "@/lib/meta/ads-manager";
 import { cpa, cpm, ctr, roas } from "@/lib/metrics/definitions";
 
 /**
@@ -33,10 +32,17 @@ export type AdCardData = {
   /** Appeared in the breakdown for this range (spend, revenue or sessions). */
   hasActivity: boolean;
   /**
-   * ad_accounts.id owning this ad, resolved to an `act_…` by the caller. Null
-   * on breakdown-only cards, which have no dimension row to read it from.
+   * ad_accounts.id owning this ad. Null on breakdown-only cards, which have
+   * no dimension row to read it from.
    */
   adAccountId: string | null;
+  /**
+   * The Ads Manager link, resolved server-side (withAdsManagerLinks) from the
+   * ad's own account. Null hides the link — the right answer when ownership
+   * is unknown. A string, deliberately: this type crosses into a client
+   * component, and a resolver function cannot.
+   */
+  adsManagerUrl: string | null;
 };
 
 /** Collapse Meta's status zoo into the three states a buyer acts on. */
@@ -71,19 +77,7 @@ function Metric({
   );
 }
 
-export function AdCard({
-  ad,
-  metaAdAccountFor,
-}: {
-  ad: AdCardData;
-  /**
-   * Resolves this ad's own account uuid to its `act_…` id. Per-ad, not a single
-   * account for the page: a client can have several, and a link naming the
-   * wrong one fails silently. Returning null just hides the link, which is the
-   * right answer when ownership is unknown.
-   */
-  metaAdAccountFor?: (adAccountId: string | null) => string | null;
-}) {
+export function AdCard({ ad }: { ad: AdCardData }) {
   const totalRevenue = ad.l1RevenuePaise + ad.l2RevenuePaise;
   const roasValue = roas(totalRevenue, ad.spendPaise);
   const cpaValue = cpa(ad.spendPaise, ad.l1PaidCount);
@@ -91,11 +85,7 @@ export function AdCard({
   const cpmValue = cpm(ad.spendPaise, ad.impressions);
   const group = statusGroup(ad.status);
   const name = ad.adName ?? ad.adKey;
-  const metaUrl = adsManagerUrl(
-    metaAdAccountFor?.(ad.adAccountId) ?? null,
-    ad.adKey,
-    ad.campaignKey,
-  );
+  const metaUrl = ad.adsManagerUrl;
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card backdrop-blur-md transition-colors hover:border-white/20">

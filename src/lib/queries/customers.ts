@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { istToday, rangeStartDay } from "@/lib/queries/overview";
+import {
+  getVoidedManualPayments,
+  sanitizeSearch,
+  type VoidedEntry,
+} from "@/lib/queries/manual-payments";
 import { rangeToDays, type RangePreset } from "@/lib/range";
 
 /**
@@ -168,15 +173,6 @@ export type CustomersPage = {
   total: number;
 };
 
-/**
- * PostgREST's or() filter is itself a comma-separated mini-language, so user
- * input must not be able to smuggle `,`/`(`/`)` into it and add clauses.
- * Wildcards go too: the user typed text, not a pattern.
- */
-function sanitizeSearch(q: string): string {
-  return q.replace(/[,()%*\\]/g, "").trim();
-}
-
 const SORT_COLUMN: Record<PeopleSort, string> = {
   ltv: "lifetime_paise",
   newest: "first_paid_at",
@@ -233,6 +229,8 @@ export async function getCustomersPage(
 }
 
 export type TimelineEntry = {
+  /** payments.id or external_payments.id — what a void targets. */
+  row_id: string;
   origin: "trace" | "external";
   source: string;
   amount: number;
@@ -254,7 +252,10 @@ export type CustomerContext = {
 
 export type CustomerDetail = {
   customer: CustomerRow & { phone_norm: string | null };
+  /** Counted purchases only — sums to lifetime value. */
   timeline: TimelineEntry[];
+  /** Voided hand-recorded rows: shown struck through, never summed. */
+  voided: VoidedEntry[];
   context: CustomerContext | null;
 };
 
@@ -279,11 +280,14 @@ export async function getCustomerDetail(
   if (error) throw new Error(`customer read failed: ${error.message}`);
   if (customer == null) return null;
 
-  const { data: timeline, error: tErr } = await supabase
-    .from("customer_payments_unified")
-    .select("origin, source, amount, paid_at, product_name, payment_method")
-    .eq("customer_id", customerId)
-    .order("paid_at", { ascending: true });
+  const [{ data: timeline, error: tErr }, voided] = await Promise.all([
+    supabase
+      .from("customer_payments_unified")
+      .select("row_id, origin, source, amount, paid_at, product_name, payment_method")
+      .eq("customer_id", customerId)
+      .order("paid_at", { ascending: true }),
+    getVoidedManualPayments(supabase, customerId),
+  ]);
   if (tErr) throw new Error(`customer timeline read failed: ${tErr.message}`);
 
   let context: CustomerContext | null = null;
@@ -326,6 +330,7 @@ export async function getCustomerDetail(
   return {
     customer: customer as CustomerDetail["customer"],
     timeline: (timeline ?? []) as TimelineEntry[],
+    voided,
     context,
   };
 }

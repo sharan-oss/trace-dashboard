@@ -1,8 +1,10 @@
 import { cookies } from "next/headers";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import Link from "next/link";
 import {
   CalendarClock,
   IndianRupee,
+  Plus,
   Repeat,
   Scale,
   Target,
@@ -12,11 +14,14 @@ import { AcquisitionTable } from "@/components/customers/acquisition-table";
 import { CustomerSheet } from "@/components/customers/customer-sheet";
 import { CustomersTabs, type CustomersTab } from "@/components/customers/customers-tabs";
 import { PeopleTable } from "@/components/customers/people-table";
+import { RecordPaymentSheet } from "@/components/customers/record-payment-sheet";
 import { TopCustomersStrip } from "@/components/customers/top-customers-strip";
 import { ValueConcentrationBar } from "@/components/customers/value-concentration-bar";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { KpiTile } from "@/components/overview/kpi-tile";
 import { BentoGrid } from "@/components/ui/bento-grid";
+import { buttonVariants } from "@/components/ui/button";
+import { getIdentity } from "@/lib/auth/session";
 import { CLIENT_COOKIE, resolveSelectedClient } from "@/lib/client-selection";
 import { getAdCreativeMeta, type AdCreativeMeta } from "@/lib/creatives";
 import {
@@ -47,8 +52,13 @@ import {
   type PeopleSort,
   type SortDir,
 } from "@/lib/queries/customers";
-import { getClients } from "@/lib/queries/overview";
-import { parseRangeParam, presetState } from "@/lib/range";
+import {
+  getCustomerBrief,
+  getLastManualProduct,
+  type CustomerHit,
+} from "@/lib/queries/manual-payments";
+import { getClients, istToday } from "@/lib/queries/overview";
+import { parseRangeParam, presetState, type RangePreset } from "@/lib/range";
 import { createServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +67,76 @@ const TOP_CUSTOMERS = 8;
 
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `?record=1` opens the record-payment sheet blank; `?record=<customer_id>`
+ * opens it prefilled with that person (only if they belong to the selected
+ * client — RLS already hides other tenants, this guards a stale cookie).
+ */
+async function resolveRecord(
+  supabase: SupabaseClient,
+  clientId: string,
+  param: string | undefined,
+): Promise<{ open: boolean; prefill: CustomerHit | null }> {
+  if (param == null || param === "") return { open: false, prefill: null };
+  if (!UUID_RE.test(param)) return { open: true, prefill: null };
+  const brief = await getCustomerBrief(supabase, param);
+  return {
+    open: true,
+    prefill: brief != null && brief.client_id === clientId ? brief : null,
+  };
+}
+
+/** Shared by both tabs so the Record button sits beside the range picker on each. */
+/** The current page's params plus `record=1`, so opening the sheet keeps tab/range/search. */
+function recordHrefFrom(params: Record<string, string | string[] | undefined>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    const value = first(v);
+    if (value != null && value !== "" && k !== "customer" && k !== "record") sp.set(k, value);
+  }
+  sp.set("record", "1");
+  return `/customers?${sp.toString()}`;
+}
+
+function CustomersHeader({
+  clientName,
+  caption,
+  preset,
+  recordHref,
+}: {
+  clientName: string;
+  caption: string;
+  preset: RangePreset;
+  /** Null when the caller may not record for this client. */
+  recordHref: string | null;
+}) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 className="text-2xl font-bold text-white">Customers</h1>
+        <p className="mt-0.5 text-sm text-slate-400">
+          {clientName} · {caption}
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {recordHref != null && (
+          <Link
+            href={recordHref}
+            scroll={false}
+            className={buttonVariants({ variant: "outline" })}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Record payment
+          </Link>
+        )}
+        <DateRangePicker state={presetState(preset)} />
+      </div>
+    </header>
+  );
 }
 
 /**
@@ -100,6 +180,7 @@ export default async function CustomersPage({
     repeat?: string | string[];
     page?: string | string[];
     customer?: string | string[];
+    record?: string | string[];
   }>;
 }) {
   const params = await searchParams;
@@ -127,6 +208,25 @@ export default async function CustomersPage({
       </div>
     );
   }
+
+  // Who may write. RLS is the real gate; these only decide what to render.
+  const identity = await getIdentity();
+  const canRecord =
+    identity != null && (identity.isAdmin || identity.clientId === selected.id);
+  const canVoid = identity?.isAdmin === true;
+  const recordHref = canRecord ? recordHrefFrom(params) : null;
+  const record = canRecord
+    ? await resolveRecord(supabase, selected.id, first(params.record))
+    : { open: false, prefill: null };
+  const recordSheet = record.open ? (
+    <RecordPaymentSheet
+      clientName={selected.name}
+      today={istToday()}
+      defaultProduct={await getLastManualProduct(supabase, selected.id)}
+      prefill={record.prefill}
+      returnToCustomerId={record.prefill?.id ?? null}
+    />
+  ) : null;
 
   // The People branch returns early: it shares the header/tabs shell but none
   // of the Value tab's aggregates, so fetching them would be waste.
@@ -165,16 +265,12 @@ export default async function CustomersPage({
 
     return (
       <div className="flex flex-col gap-6 p-6 sm:p-8">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Customers</h1>
-            <p className="mt-0.5 text-sm text-slate-400">
-              {selected.name} · people who first bought in this range, valued in
-              full
-            </p>
-          </div>
-          <DateRangePicker state={presetState(preset)} />
-        </header>
+        <CustomersHeader
+          clientName={selected.name}
+          caption="people who first bought in this range, valued in full"
+          preset={preset}
+          recordHref={recordHref}
+        />
 
         <CustomersTabs active="people" range={preset} />
 
@@ -189,9 +285,15 @@ export default async function CustomersPage({
           creativeMeta={creativeMeta}
         />
 
-        {detail != null && (
-          <CustomerSheet detail={detail} creativeMeta={creativeMeta} />
+        {detail != null && !record.open && (
+          <CustomerSheet
+            detail={detail}
+            creativeMeta={creativeMeta}
+            canRecord={canRecord}
+            canVoid={canVoid}
+          />
         )}
+        {recordSheet}
       </div>
     );
   }
@@ -238,16 +340,12 @@ export default async function CustomersPage({
 
   return (
     <div className="flex flex-col gap-6 p-6 sm:p-8">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Customers</h1>
-          <p className="mt-0.5 text-sm text-slate-400">
-            {selected.name} · people who first bought in this range, valued in
-            full
-          </p>
-        </div>
-        <DateRangePicker state={presetState(preset)} />
-      </header>
+      <CustomersHeader
+        clientName={selected.name}
+        caption="people who first bought in this range, valued in full"
+        preset={preset}
+        recordHref={recordHref}
+      />
 
       <CustomersTabs active="value" range={preset} />
 
@@ -326,6 +424,7 @@ export default async function CustomersPage({
       <TopCustomersStrip rows={top} creativeMeta={creativeMeta} />
 
       <AcquisitionTable rows={byAd} creativeMeta={creativeMeta} />
+      {recordSheet}
     </div>
   );
 }

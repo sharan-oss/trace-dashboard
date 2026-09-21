@@ -295,7 +295,7 @@ An empty state is a card that teaches — centered, generous padding, muted icon
 - **Transitions:** `transition-colors` everywhere; `transition-all` only on cards (border + bg animate together). No durations specified — Tailwind defaults.
 - **Hover = brighten:** raise the alpha (`white/5` → `white/8`, `white/10` → `white/20`), lift the text a rung (`slate-400` → `white`, title → `indigo-300`). Never shadows, never scale.
 - **Loading:** `Loader2`/`CircleDashed` with `animate-spin`; buttons also get `disabled:opacity-60` and a progressive label.
-- **No modals.** Create/edit are full pages with a back arrow; destructive-adjacent flows get their own route.
+- **No modal pages.** Heavy create/edit flows are full pages with a back arrow; destructive-adjacent flows get their own route. URL-driven right-anchored **sheets** (base-ui Dialog positioned right, opened by a search param) are the dashboard's idiom for drill-downs *and* lightweight entry — customer sheet, day drill-down, record payment (2026-09-21).
 - **Optimistic copy:** clipboard writes assume success, show confirmation, revert after 2s.
 
 ## 5. UX writing
@@ -314,7 +314,7 @@ The repo also carries the stock shadcn **base-nova / neutral** token layer in `g
 1. **Fastest parity:** copy the recipes in this doc as shared components (`GlassCard`, `PrimaryButton`, `inputClass`, …) and skip shadcn tokens for admin surfaces.
 2. **Cleaner long-term:** keep shadcn components, but remap the `.dark` tokens to this system — `--background` ≈ slate-950 gradient stops, `--card` ≈ white/5 over slate, `--primary` = indigo-600, `--destructive` = red-400 family, `--border` = `oklch(1 0 0 / 10%)` (already matches), radius `--radius: 0.625rem` (cards use `rounded-2xl`).
 
-Either way, keep the invariants: dark-only, alpha-based elevation, indigo-only actions, icon+text status badges, no shadows, no modals.
+Either way, keep the invariants: dark-only, alpha-based elevation, indigo-only actions, icon+text status badges, no shadows, no modal pages (URL-driven sheets only).
 
 ## 7. Porting checklist for the new dashboard
 

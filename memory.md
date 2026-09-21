@@ -54,6 +54,6 @@ Begin from `rm -rf .next && npm run dev` — the dev server was polluted by conc
 ## Open questions
 
 - `tests/v-sessions-attributed.test.ts:175` — tighten the test to the normalised id, or stop Trace writing truncated `ad_id`s upstream?
-- `external_payments.status` has **no CHECK constraint**; `'captured'` is convention-only, so a hand-typed `'paid'` would vanish from every upsell number. Three hand-entered rows in, and the add-transaction UI is still owed.
-- `docs/STATUS.md` records customer names, emails and phones for the manual payments. Fine if the private repo is the intended audit trail, but the payment ids alone would preserve it. Still awaiting a call.
+- ~~`external_payments.status` has no CHECK; the add-transaction UI is still owed~~ — both resolved 2026-09-21 (record-payment flow + `CHECK (status in ('captured','voided'))`, ADR 004). Remaining v2 items: CSV/bulk entry, partial payments, an "UPI" label on synced Razorpay rows.
+- `docs/STATUS.md` still holds the names/emails/phones of the eight legacy manual rows. Now that the flow exists, the rows themselves are the audit trail — trim STATUS to ids next time it is edited?
 - Drill-down on the Spends/CPA chart tabs, gated on promoting the chart tab to a URL param.

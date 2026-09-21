@@ -1,9 +1,12 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { AdPeek } from "@/components/customers/ad-peek";
+import { VoidPaymentForm } from "@/components/customers/void-payment-form";
+import { buttonVariants } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { avatarDataUri } from "@/lib/avatars";
 import type { AdCreativeMeta } from "@/lib/creatives";
@@ -31,14 +34,22 @@ import type { CustomerDetail } from "@/lib/queries/customers";
  * link" rows arrived through the gateway sync and were matched to this person
  * by the identity spine; hand-recorded rows name the method ("GPay · recorded
  * by hand"). A null product renders "—", never a guess — that gap is real and
- * belongs to upstream capture.
+ * belongs to upstream capture. Voided hand-recorded rows stay visible, struck
+ * through with who voided them and why — an audit trail, never a total.
+ *
+ * "Record payment" swaps this sheet for the record sheet prefilled with this
+ * person (`?record=<id>` replaces `?customer=`; Done brings it back).
  */
 export function CustomerSheet({
   detail,
   creativeMeta,
+  canRecord,
+  canVoid,
 }: {
   detail: CustomerDetail;
   creativeMeta: Record<string, AdCreativeMeta>;
+  canRecord: boolean;
+  canVoid: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -50,7 +61,13 @@ export function CustomerSheet({
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
 
-  const { customer, timeline, context } = detail;
+  const { customer, timeline, voided, context } = detail;
+  const recordHref = (() => {
+    const next = new URLSearchParams(params.toString());
+    next.delete("customer");
+    next.set("record", customer.customer_id);
+    return `${pathname}?${next.toString()}`;
+  })();
   const device =
     [context?.device_brand, context?.device_model]
       .filter(Boolean)
@@ -74,7 +91,7 @@ export function CustomerSheet({
         <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
         <Dialog.Popup className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col overflow-y-auto border-l border-white/10 bg-popover p-6 text-popover-foreground outline-none">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element -- inline data URI */}
               <img
                 src={avatarDataUri(customer.customer_id)}
@@ -96,12 +113,25 @@ export function CustomerSheet({
                 )}
               </div>
             </div>
-            <Dialog.Close
-              aria-label="Close"
-              className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg border border-border bg-white/5 text-slate-400 transition-colors hover:text-white"
-            >
-              <X size={14} aria-hidden="true" />
-            </Dialog.Close>
+            <div className="flex shrink-0 items-center gap-2">
+              {canRecord && (
+                <Link
+                  href={recordHref}
+                  replace
+                  scroll={false}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  <Plus size={12} aria-hidden="true" />
+                  Record payment
+                </Link>
+              )}
+              <Dialog.Close
+                aria-label="Close"
+                className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg border border-border bg-white/5 text-slate-400 transition-colors hover:text-white"
+              >
+                <X size={14} aria-hidden="true" />
+              </Dialog.Close>
+            </div>
           </div>
 
           <div className="mt-5 rounded-xl border border-indigo-500/30 bg-indigo-500/6 p-4">
@@ -184,13 +214,57 @@ export function CustomerSheet({
                           )}
                       </p>
                     </div>
-                    <p className="shrink-0 text-sm font-semibold text-white tabular-nums">
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold text-white tabular-nums">
+                        {formatINR(entry.amount)}
+                      </p>
+                      {canVoid && entry.origin === "external" && entry.source === "manual" && (
+                        <VoidPaymentForm paymentId={entry.row_id} />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+              {voided.map((entry) => {
+                const origin = paymentOrigin({
+                  external: true,
+                  source: "manual",
+                  method: entry.payment_method,
+                });
+                return (
+                  <li
+                    key={entry.row_id}
+                    className="flex items-baseline justify-between gap-3 border-b border-white/5 py-2.5 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-500 line-through">
+                        {entry.product_name ?? "—"}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-600">
+                        <span className="tabular-nums">
+                          {new Date(entry.paid_at).toLocaleDateString("en-GB", {
+                            timeZone: "Asia/Kolkata",
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}
+                        </span>
+                        <span className="rounded border border-white/10 px-1.5 py-px" title={origin.title}>
+                          {origin.label}
+                        </span>
+                        <span>
+                          Voided{entry.voided_by ? ` by ${entry.voided_by}` : ""}
+                          {entry.void_reason ? ` · ${entry.void_reason}` : ""}
+                        </span>
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-semibold text-slate-600 tabular-nums line-through">
                       {formatINR(entry.amount)}
                     </p>
                   </li>
                 );
               })}
-              {timeline.length === 0 && (
+              {timeline.length === 0 && voided.length === 0 && (
                 <li className="py-3 text-sm text-slate-500">
                   No purchases visible for this customer.
                 </li>

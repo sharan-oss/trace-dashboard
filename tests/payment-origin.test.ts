@@ -55,6 +55,15 @@ describe("paymentOrigin", () => {
     ).toBe("Payment link");
   });
 
+  it("knows every method the record-payment form can write", () => {
+    expect(paymentOrigin({ external: true, source: "manual", method: "phonepe" }).label).toBe(
+      "PhonePe · recorded by hand",
+    );
+    expect(paymentOrigin({ external: true, source: "manual", method: "cheque" }).label).toBe(
+      "Cheque · recorded by hand",
+    );
+  });
+
   it("labels TagMango by name", () => {
     expect(
       paymentOrigin({ external: true, source: "tagmango", method: null }).label,

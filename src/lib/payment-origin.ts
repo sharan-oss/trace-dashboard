@@ -13,11 +13,14 @@
 
 const METHOD_NAMES: Record<string, string> = {
   gpay: "GPay",
+  phonepe: "PhonePe",
   upi: "UPI",
   card: "Card",
   netbanking: "Net banking",
   bank_transfer: "Bank transfer",
   cash: "Cash",
+  cheque: "Cheque",
+  other: "Other",
 };
 
 function methodName(method: string): string {

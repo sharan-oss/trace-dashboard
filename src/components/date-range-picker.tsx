@@ -3,10 +3,11 @@
 import { Popover } from "@base-ui/react/popover";
 import { Switch } from "@base-ui/react/switch";
 import { CalendarDays, X } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useDestination, usePendingRouter } from "@/components/navigation/pending-navigation";
 import { useState } from "react";
 import { formatDayRange } from "@/lib/format";
-import { RANGE_OPTIONS, type RangeState } from "@/lib/range";
+import { parseRangeState, RANGE_OPTIONS, type RangeState } from "@/lib/range";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,7 +25,7 @@ import { cn } from "@/lib/utils";
  * ?campaign= must survive every interaction here.
  */
 export function DateRangePicker({
-  state,
+  state: rendered,
   showCustom = false,
   showL2Toggle = false,
 }: {
@@ -38,10 +39,18 @@ export function DateRangePicker({
   /** False hides the split control entirely: no L2 rows means it could only read zero. */
   showL2Toggle?: boolean;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const destination = useDestination();
   const [open, setOpen] = useState(false);
+
+  // While a change to this page is in flight, show the window being loaded
+  // rather than the one on screen — the pill moves on click, not on arrival.
+  const state =
+    destination.pending && destination.pathname === pathname
+      ? parseRangeState(Object.fromEntries(destination.searchParams))
+      : rendered;
 
   const custom = state.l1.kind === "custom" ? state.l1 : null;
 

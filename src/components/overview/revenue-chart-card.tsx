@@ -1,6 +1,7 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { usePendingRouter } from "@/components/navigation/pending-navigation";
 import { useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
@@ -180,7 +181,7 @@ export function RevenueChartCard({
   const config: ChartConfig =
     tab === "revenue" ? revenueConfig : tab === "spends" ? spendConfig : cpaConfig;
 
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 

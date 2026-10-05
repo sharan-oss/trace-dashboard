@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import Link from "next/link";
+import { PendingLink } from "@/components/navigation/pending-navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   IndianRupee,
@@ -358,12 +358,12 @@ export default async function AdsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
           <SyncStatusNote accounts={accounts} />
-          <Link
+          <PendingLink
             href="/ads/sync-log"
             className="text-xs text-slate-500 underline decoration-white/15 underline-offset-2 transition-colors hover:text-slate-300"
           >
             Sync log
-          </Link>
+          </PendingLink>
         </div>
         <SyncNowButton
           accounts={accounts.map((a) => ({

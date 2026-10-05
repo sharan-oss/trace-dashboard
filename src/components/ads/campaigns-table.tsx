@@ -1,7 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { PendingLink, usePendingRouter } from "@/components/navigation/pending-navigation";
 import { ChevronRight } from "lucide-react";
 import {
   Card,
@@ -87,7 +86,7 @@ export function CampaignsTable({
   unattributedL1RevenuePaise,
   unattributedL1Count,
 }: Props) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const campaigns = rows.filter((r) => r.tier === "campaign");
 
   function adsHref(campaignKey: string) {
@@ -143,14 +142,14 @@ export function CampaignsTable({
                   <td className="py-3 pr-4">
                     <div className="flex items-center gap-2">
                       {clickable ? (
-                        <Link
+                        <PendingLink
                           href={adsHref(row.campaign_key!)}
                           onClick={(e) => e.stopPropagation()}
                           className="truncate font-medium text-white hover:text-indigo-300"
                           title={label}
                         >
                           {label}
-                        </Link>
+                        </PendingLink>
                       ) : (
                         <span
                           className="truncate font-medium text-slate-400"

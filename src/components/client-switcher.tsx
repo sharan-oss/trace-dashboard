@@ -1,6 +1,7 @@
 "use client";
 
-import { useTransition } from "react";
+import { useOptimistic } from "react";
+import { useRunPending } from "@/components/navigation/pending-navigation";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { selectClient } from "@/app/(dashboard)/actions";
 import {
@@ -25,8 +26,10 @@ export function ClientSwitcher({
   clients: ClientRow[];
   selectedId: string | null;
 }) {
-  const [isPending, startTransition] = useTransition();
-  const selected = clients.find((c) => c.id === selectedId) ?? null;
+  const runPending = useRunPending();
+  // The picked client shows at once; the page dims until its data arrives.
+  const [shownId, setShownId] = useOptimistic(selectedId);
+  const selected = clients.find((c) => c.id === shownId) ?? null;
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -37,7 +40,6 @@ export function ClientSwitcher({
         <DropdownMenuTrigger
           className={cn(
             "flex w-full items-center justify-between gap-2 rounded-lg border border-sidebar-border bg-white/5 px-3 py-2 text-left text-sm font-medium text-white transition-colors hover:bg-white/8 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 focus:outline-none",
-            isPending && "opacity-60",
           )}
           disabled={clients.length === 0}
         >
@@ -48,7 +50,12 @@ export function ClientSwitcher({
           {clients.map((c) => (
             <DropdownMenuItem
               key={c.id}
-              onClick={() => startTransition(() => selectClient(c.id))}
+              onClick={() =>
+                runPending(async () => {
+                  setShownId(c.id);
+                  await selectClient(c.id);
+                })
+              }
             >
               <span className="flex min-w-0 flex-col">
                 <span className="truncate text-sm text-slate-300">
@@ -58,7 +65,7 @@ export function ClientSwitcher({
                   {c.id}
                 </span>
               </span>
-              {c.id === selectedId && (
+              {c.id === shownId && (
                 <Check
                   size={15}
                   className="ml-auto shrink-0 text-accent-foreground"

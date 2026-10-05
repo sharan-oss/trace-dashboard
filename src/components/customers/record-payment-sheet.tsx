@@ -2,7 +2,8 @@
 
 import { Dialog } from "@base-ui/react/dialog";
 import { Check, Loader2, X } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { usePendingRouter } from "@/components/navigation/pending-navigation";
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import {
   recordManualPayment,
@@ -80,7 +81,7 @@ export function RecordPaymentSheet({
   /** Set when opened from a customer's sheet — Done goes back there. */
   returnToCustomerId: string | null;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const id = useId();

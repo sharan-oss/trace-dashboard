@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePendingRouter } from "@/components/navigation/pending-navigation";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { nightlyWindow } from "@/lib/meta/nightly";
@@ -32,7 +32,7 @@ export function SyncNowButton({
   accounts: AccountRef[];
   anyRunning: boolean;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const [progress, setProgress] = useState<string | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
 

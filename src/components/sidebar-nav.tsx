@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { Filter, LayoutDashboard, Megaphone, Users, UserCog } from "lucide-react";
+import { PendingLink, useDestination } from "@/components/navigation/pending-navigation";
+import { isNavItemActive } from "@/lib/navigation/destination";
 import { cn } from "@/lib/utils";
 
 const ITEMS = [
@@ -19,16 +19,16 @@ const ADMIN_ITEMS = [
 ] as const;
 
 export function SidebarNav({ isAdmin }: { isAdmin: boolean }) {
-  const pathname = usePathname();
+  // The destination, not the rendered path: the highlight moves on click.
+  const { pathname } = useDestination();
   const items = isAdmin ? [...ITEMS, ...ADMIN_ITEMS] : ITEMS;
 
   return (
     <nav className="flex flex-row gap-1 overflow-x-auto sm:flex-col">
       {items.map(({ href, label, icon: Icon }) => {
-        const active =
-          href === "/" ? pathname === "/" : pathname.startsWith(href);
+        const active = isNavItemActive(href, pathname);
         return (
-          <Link
+          <PendingLink
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
@@ -41,7 +41,7 @@ export function SidebarNav({ isAdmin }: { isAdmin: boolean }) {
           >
             <Icon size={15} className="shrink-0" />
             {label}
-          </Link>
+          </PendingLink>
         );
       })}
     </nav>

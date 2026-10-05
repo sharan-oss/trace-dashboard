@@ -2,8 +2,8 @@
 
 import { Dialog } from "@base-ui/react/dialog";
 import { ArrowUpRight, X } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { PendingLink, usePendingRouter } from "@/components/navigation/pending-navigation";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCount, formatDayRange, formatDayShort, formatINR } from "@/lib/format";
 import { paymentOrigin } from "@/lib/payment-origin";
@@ -133,14 +133,14 @@ function PaymentRow({
 
   return (
     <li className="border-b border-white/5 last:border-0">
-      <Link
+      <PendingLink
         // range=all so the person is guaranteed present in the table behind the
         // sheet; tab=people because CustomerSheet only renders in that branch.
         href={`/customers?tab=people&range=all&customer=${row.customer_id}`}
         className="group flex items-baseline justify-between gap-3 py-2.5 transition-colors hover:bg-white/3"
       >
         {body}
-      </Link>
+      </PendingLink>
     </li>
   );
 }
@@ -200,7 +200,7 @@ export function DayDetailSheet({
   l2Window: DateWindow | null;
   truncated: boolean;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const params = useSearchParams();
 

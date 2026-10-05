@@ -1,4 +1,5 @@
-import Link from "next/link";
+import { LinkTabs } from "@/components/navigation/link-tabs";
+import { PendingLink } from "@/components/navigation/pending-navigation";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 import { AdPeek } from "@/components/customers/ad-peek";
 import {
@@ -107,13 +108,13 @@ export function FunnelSegments({
         <CardTitle className="text-base font-semibold text-white">
           {lens === "ad" ? (
             <span className="flex flex-wrap items-center gap-2">
-              <Link
+              <PendingLink
                 href={`/funnel?lens=campaign&range=${range}`}
                 className="flex items-center gap-1 text-sm font-medium text-slate-400 transition-colors hover:text-white"
               >
                 <ArrowLeft size={14} aria-hidden="true" />
                 Campaigns
-              </Link>
+              </PendingLink>
               <span className="text-slate-600">/</span>
               <span className="min-w-0 truncate" title={campaignLabel ?? undefined}>
                 {campaignLabel ?? campaignKey}
@@ -134,26 +135,19 @@ export function FunnelSegments({
       </CardHeader>
       <CardContent>
         {lens !== "ad" && (
-          <nav
-            aria-label="Funnel lens"
-            className="mb-4 inline-flex w-fit items-center gap-0.5 rounded-lg border border-border bg-white/5 p-0.5"
-          >
-            {LENSES.map((l) => (
-              <Link
-                key={l.value}
-                href={`/funnel?lens=${l.value}&range=${range}`}
-                aria-current={lens === l.value ? "page" : undefined}
-                className={cn(
-                  "rounded-md px-4 py-1.5 text-xs font-medium whitespace-nowrap transition-colors",
-                  lens === l.value
-                    ? "bg-accent text-accent-foreground"
-                    : "text-slate-400 hover:text-white",
-                )}
-              >
-                {l.label}
-              </Link>
-            ))}
-          </nav>
+          <LinkTabs
+            label="Funnel lens"
+            className="mb-4"
+            active={lens}
+            basePath="/funnel"
+            param="lens"
+            defaultKey="campaign"
+            tabs={LENSES.map((l) => ({
+              key: l.value,
+              label: l.label,
+              href: `/funnel?lens=${l.value}&range=${range}`,
+            }))}
+          />
         )}
 
         <div className="overflow-x-auto">
@@ -205,13 +199,13 @@ export function FunnelSegments({
                             className="cursor-help font-medium text-white underline decoration-white/20 decoration-dotted underline-offset-2 hover:decoration-indigo-400/60"
                           />
                         ) : drillable ? (
-                          <Link
+                          <PendingLink
                             href={`/funnel?lens=ad&campaign=${encodeURIComponent(row.segment_key as string)}&range=${range}`}
                             className="font-medium text-white hover:text-indigo-300"
                             title={label as string}
                           >
                             {label}
-                          </Link>
+                          </PendingLink>
                         ) : (
                           <span className="font-medium text-white" title={label as string}>
                             {label}

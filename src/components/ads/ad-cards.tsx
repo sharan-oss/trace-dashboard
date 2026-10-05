@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { usePendingRouter } from "@/components/navigation/pending-navigation";
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
@@ -162,7 +163,7 @@ export function AdCards({
   /** Set only in split-window mode: which window the L2 figures cover. */
   l2WindowLabel?: string | null;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 

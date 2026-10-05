@@ -1,8 +1,8 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { PendingLink, usePendingRouter } from "@/components/navigation/pending-navigation";
 import { Plus, X } from "lucide-react";
 import { AdPeek } from "@/components/customers/ad-peek";
 import { VoidPaymentForm } from "@/components/customers/void-payment-form";
@@ -51,7 +51,7 @@ export function CustomerSheet({
   canRecord: boolean;
   canVoid: boolean;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const params = useSearchParams();
 
@@ -115,7 +115,7 @@ export function CustomerSheet({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {canRecord && (
-                <Link
+                <PendingLink
                   href={recordHref}
                   replace
                   scroll={false}
@@ -123,7 +123,7 @@ export function CustomerSheet({
                 >
                   <Plus size={12} aria-hidden="true" />
                   Record payment
-                </Link>
+                </PendingLink>
               )}
               <Dialog.Close
                 aria-label="Close"

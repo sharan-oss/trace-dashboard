@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { PendingLink, usePendingRouter } from "@/components/navigation/pending-navigation";
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
@@ -85,7 +85,7 @@ export function PeopleTable({
   repeatOnly: boolean;
   creativeMeta: Record<string, AdCreativeMeta>;
 }) {
-  const router = useRouter();
+  const router = usePendingRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const [searchDraft, setSearchDraft] = useState(search);
@@ -258,7 +258,7 @@ export function PeopleTable({
                   className="border-b border-white/5 text-slate-300 transition-colors last:border-0 hover:bg-white/3"
                 >
                   <td className="py-2.5 pr-4">
-                    <Link
+                    <PendingLink
                       href={customerHref(row.customer_id)}
                       scroll={false}
                       className="flex items-center gap-2.5"
@@ -287,7 +287,7 @@ export function PeopleTable({
                           </span>
                         )}
                       </span>
-                    </Link>
+                    </PendingLink>
                   </td>
                   <td className="max-w-52 py-2.5 pr-4">
                     {row.ad_key != null || row.ad_name != null ? (

@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { cookies } from "next/headers";
-import Link from "next/link";
+import { PendingLink } from "@/components/navigation/pending-navigation";
 import { ArrowLeft, CircleDashed, RefreshCw } from "lucide-react";
 import {
   Card,
@@ -98,13 +98,13 @@ export default async function SyncLogPage() {
           <h1 className="text-2xl font-bold text-white">Sync log</h1>
           <p className="mt-0.5 text-sm text-slate-400">{selected.name}</p>
         </div>
-        <Link
+        <PendingLink
           href="/ads"
           className="inline-flex items-center gap-1.5 text-xs text-slate-500 transition-colors hover:text-slate-300"
         >
           <ArrowLeft size={14} aria-hidden="true" />
           Back to Ads
-        </Link>
+        </PendingLink>
       </header>
 
       <Card>

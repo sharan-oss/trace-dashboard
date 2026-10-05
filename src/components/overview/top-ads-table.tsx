@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { PendingLink } from "@/components/navigation/pending-navigation";
 import { ArrowRight } from "lucide-react";
 import {
   Card,
@@ -146,13 +146,13 @@ export function TopAdsTable({
         </table>
       </CardContent>
       <CardFooter>
-        <Link
+        <PendingLink
           href="/ads"
           className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-400 transition-colors hover:text-white"
         >
           View all ads
           <ArrowRight size={13} />
-        </Link>
+        </PendingLink>
       </CardFooter>
     </Card>
   );

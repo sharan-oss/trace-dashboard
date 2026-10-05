@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import Link from "next/link";
+import { PendingLink } from "@/components/navigation/pending-navigation";
 import {
   CalendarClock,
   IndianRupee,
@@ -124,14 +124,14 @@ function CustomersHeader({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {recordHref != null && (
-          <Link
+          <PendingLink
             href={recordHref}
             scroll={false}
             className={buttonVariants({ variant: "outline" })}
           >
             <Plus size={14} aria-hidden="true" />
             Record payment
-          </Link>
+          </PendingLink>
         )}
         <DateRangePicker state={presetState(preset)} />
       </div>

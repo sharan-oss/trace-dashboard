@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -35,5 +35,32 @@ describe("every dashboard page has its own loading skeleton", () => {
 
   it("puts no loading.tsx directly in (dashboard)/, which would shadow every page's own", () => {
     expect(existsSync(join(SRC, "app/(dashboard)/loading.tsx"))).toBe(false);
+  });
+});
+
+describe("dashboard navigation goes through the pending layer", () => {
+  // Outside the dashboard shell there is no PendingNavigationProvider, so these
+  // may keep using Next's primitives directly.
+  const ALLOWED = [
+    "components/navigation/pending-navigation.tsx",
+    "app/(auth)/",
+    "app/auth/",
+    "app/(marketing)/",
+    "app/new/",
+  ];
+  const DIRECT_LINK = /from\s+["']next\/link["']/;
+  const DIRECT_ROUTER = /import\s*\{[^}]*\buseRouter\b[^}]*\}\s*from\s+["']next\/navigation["']/;
+
+  it("imports neither next/link nor useRouter outside the layer", () => {
+    const offenders = FILES.filter((f) => !ALLOWED.some((a) => rel(f).startsWith(a)))
+      .filter((f) => {
+        const source = readFileSync(f, "utf8");
+        return DIRECT_LINK.test(source) || DIRECT_ROUTER.test(source);
+      })
+      .map(rel);
+    expect(
+      offenders,
+      "Use PendingLink / usePendingRouter from @/components/navigation/pending-navigation — a direct Link or router gives no feedback while the next page loads.",
+    ).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import { LogOut } from "lucide-react";
 import { signOut } from "@/lib/auth/actions";
 import type { Identity } from "@/lib/auth/session";
+import { SubmitIconButton } from "@/components/ui/submit-icon-button";
 
 /**
  * Who you are, and the way out. Sits at the foot of the sidebar; the role line
@@ -22,14 +23,12 @@ export function AccountMenu({ identity }: { identity: Identity }) {
         <span className="text-xs text-slate-500">{role}</span>
       </div>
       <form action={signOut}>
-        <button
-          type="submit"
-          aria-label="Sign out"
-          title="Sign out"
+        <SubmitIconButton
+          label="Sign out"
           className="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/5 hover:text-white"
         >
           <LogOut size={15} />
-        </button>
+        </SubmitIconButton>
       </form>
     </div>
   );

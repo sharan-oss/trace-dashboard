@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { SubmitIconButton } from "@/components/ui/submit-icon-button";
 import { getIdentity } from "@/lib/auth/session";
 import { getClients } from "@/lib/queries/overview";
 import { createServerClient } from "@/lib/supabase/server";
@@ -150,14 +151,12 @@ export default async function UsersPage() {
                     ) : (
                       <form action={removeUser} className="inline">
                         <input type="hidden" name="id" value={user.id} />
-                        <button
-                          type="submit"
-                          aria-label={`Remove ${user.email}`}
-                          title={`Remove ${user.email}`}
+                        <SubmitIconButton
+                          label={`Remove ${user.email}`}
                           className="inline-flex size-7 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 size={14} />
-                        </button>
+                        </SubmitIconButton>
                       </form>
                     )}
                   </td>

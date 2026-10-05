@@ -501,3 +501,49 @@ describe("runAdAccountSync — deadline awareness and the atomic claim", () => {
     await db.from("ad_sync_runs").delete().eq("id", first!.id);
   });
 });
+
+describe("runAdAccountSync — creative urls from the asset catalog", () => {
+  // Every other test hands the sync an EMPTY image catalog, so the write that
+  // stores a resolved url never ran under test — and in production it was
+  // rejected outright: the upsert sent four columns, and Postgres checks the
+  // NOT NULL ones (ad_name, meta_adset_id, …) on the would-be insert row before
+  // ON CONFLICT turns it into an update. 48 Love School ads lost their images.
+  it("stores the catalog url for an ad whose image hash it lists", async () => {
+    const ad: MetaAd = {
+      ...adFixture("test_sync_ad_creative"),
+      creative: { id: "test_cr_catalog", image_hash: "test_hash_catalog" },
+    };
+    const meta = {
+      ...fakeMeta([ad], []),
+      listAdImages: async () => [
+        { hash: "test_hash_catalog", permalink_url: "https://example.invalid/p.jpg" },
+      ],
+    };
+
+    const result = await runAdAccountSync(
+      { db, meta, thumbnails: { limit: 0 } },
+      account,
+      DATE,
+      DATE
+    );
+    expect(result.conflict).toBeFalsy();
+    if (result.conflict) return;
+
+    const { data: row } = await db
+      .from("ads")
+      .select("creative_source_url, ad_name")
+      .eq("meta_ad_id", "test_sync_ad_creative")
+      .single();
+    expect(row?.creative_source_url).toBe("https://example.invalid/p.jpg");
+    expect(row?.ad_name).toBe("fixture test_sync_ad_creative");
+
+    const { data: run } = await db
+      .from("ad_sync_runs")
+      .select("error")
+      .eq("id", result.runId)
+      .single();
+    // Other fixture ads in this account may honestly lack a creative; what
+    // must never recur is the write itself being rejected.
+    expect(run?.error ?? "").not.toMatch(/write failed/);
+  });
+});

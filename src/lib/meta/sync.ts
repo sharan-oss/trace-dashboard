@@ -205,6 +205,7 @@ export async function runAdAccountSync(
   try {
     const now = new Date().toISOString();
     let creativeFailures = 0;
+    let creativeWriteError: string | null = null;
 
     // 1. Dimension: adopt/refresh the account's ads. Incremental whenever we
     //    already hold rows for this account — a full walk costs ~6 API calls
@@ -365,7 +366,21 @@ export async function runAdAccountSync(
     if (deps.thumbnails) {
       try {
         assertBudget(deps.deadlineAt);
-        const pending: { meta_ad_id: string; meta_image_hash: string | null; meta_video_id: string | null }[] = [];
+        // The NOT NULL dimension columns ride along so the url write below can
+        // be an upsert: Postgres checks NOT NULL on the would-be insert row
+        // BEFORE ON CONFLICT makes it an update, so a four-column upsert was
+        // rejected outright (48 Love School ads, Aug–Oct 2026).
+        type PendingRow = {
+          meta_ad_id: string;
+          meta_image_hash: string | null;
+          meta_video_id: string | null;
+          meta_adset_id: string;
+          meta_campaign_id: string;
+          ad_name: string;
+          adset_name: string;
+          campaign_name: string;
+        };
+        const pending: PendingRow[] = [];
         const PAGE = 1000;
         for (let from = 0; ; from += PAGE) {
           // Paged: PostgREST caps ANY select at 1000 rows, `.limit(5000)`
@@ -373,7 +388,9 @@ export async function runAdAccountSync(
           // account and calls it done.
           const { data, error: pendingError } = await db
             .from("ads")
-            .select("meta_ad_id, meta_image_hash, meta_video_id")
+            .select(
+              "meta_ad_id, meta_image_hash, meta_video_id, meta_adset_id, meta_campaign_id, ad_name, adset_name, campaign_name"
+            )
             .eq("ad_account_id", account.id)
             .is("creative_source_url", null)
             .order("meta_ad_id")
@@ -417,21 +434,31 @@ export async function runAdAccountSync(
                 (row.meta_image_hash != null ? urlByHash.get(row.meta_image_hash) : undefined) ??
                 (row.meta_video_id != null ? posterByVideo.get(row.meta_video_id) : undefined) ??
                 inlineByAd.get(row.meta_ad_id);
-              return url == null ? null : { meta_ad_id: row.meta_ad_id, creative_source_url: url };
+              return url == null ? null : { row, creative_source_url: url };
             })
-            .filter((u): u is { meta_ad_id: string; creative_source_url: string } => u != null);
+            .filter((u): u is { row: PendingRow; creative_source_url: string } => u != null);
 
           if (updates.length > 0) {
             const { error: creativeError } = await db.from("ads").upsert(
-              updates.map((u) => ({
+              updates.map(({ row, creative_source_url }) => ({
                 client_id: account.client_id,
                 ad_account_id: account.id,
-                meta_ad_id: u.meta_ad_id,
-                creative_source_url: u.creative_source_url,
+                meta_ad_id: row.meta_ad_id,
+                meta_adset_id: row.meta_adset_id,
+                meta_campaign_id: row.meta_campaign_id,
+                ad_name: row.ad_name,
+                adset_name: row.adset_name,
+                campaign_name: row.campaign_name,
+                creative_source_url,
               })),
               { onConflict: "meta_ad_id" }
             );
-            if (creativeError) creativeFailures = updates.length;
+            if (creativeError) {
+              creativeFailures = updates.length;
+              // Named in the run log: a write failure read as "N creative
+              // urls unresolved" and was misdiagnosed as a Meta problem.
+              creativeWriteError = creativeError.message;
+            }
           }
           creativeFailures += pending.length - updates.length;
         }
@@ -456,6 +483,7 @@ export async function runAdAccountSync(
       skipped > 0 ? `${skipped} insight rows had no dimension row` : null,
       thumbs.failed > 0 ? `${thumbs.failed} thumbnails failed to mirror` : null,
       creativeFailures > 0 ? `${creativeFailures} creative urls unresolved` : null,
+      creativeWriteError != null ? `creative url write failed: ${creativeWriteError}` : null,
     ].filter(Boolean);
     const status = problems.length > 0 ? "partial" : "success";
     await db

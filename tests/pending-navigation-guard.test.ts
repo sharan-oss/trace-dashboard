@@ -38,6 +38,16 @@ describe("every dashboard page has its own loading skeleton", () => {
   });
 });
 
+describe("the error page's Try again is itself acknowledged", () => {
+  // unstable_retry re-fetches inside Next's own transition, which nothing
+  // observes — routed through runPending, the page dims and the bar runs.
+  it("routes unstable_retry through useRunPending", () => {
+    const source = readFileSync(join(SRC, "app/(dashboard)/error.tsx"), "utf8");
+    expect(source).toMatch(/useRunPending\(\)/);
+    expect(source).toMatch(/runPending\(\s*\(\)\s*=>\s*unstable_retry\(\)\s*\)/);
+  });
+});
+
 describe("dashboard navigation goes through the pending layer", () => {
   // Outside the dashboard shell there is no PendingNavigationProvider, so these
   // may keep using Next's primitives directly.

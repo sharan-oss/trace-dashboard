@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { RotateCw, TriangleAlert } from "lucide-react";
+import { useRunPending } from "@/components/navigation/pending-navigation";
 import { buttonVariants } from "@/components/ui/button";
 
 /**
@@ -17,6 +18,11 @@ export default function DashboardError({
   error: Error & { digest?: string };
   unstable_retry: () => void;
 }) {
+  // unstable_retry re-fetches inside Next's own transition, which nothing
+  // observes; running it through the pending layer dims the page and runs the
+  // bar, so Try again is acknowledged like every other click.
+  const runPending = useRunPending();
+
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -35,7 +41,7 @@ export default function DashboardError({
         </p>
         <button
           type="button"
-          onClick={() => unstable_retry()}
+          onClick={() => runPending(() => unstable_retry())}
           className={buttonVariants({ variant: "outline", className: "mt-5" })}
         >
           <RotateCw size={14} aria-hidden="true" />

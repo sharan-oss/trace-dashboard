@@ -87,7 +87,7 @@ This round does not make the server faster. That is C.
   - 2 px, absolutely positioned at the top of the region, `pointer-events: none`.
   - An indigo-to-indigo-300 gradient segment slides across over 1.1 s, infinitely.
   - Opacity goes 0 → 1 under `[data-pending]` after `var(--pending-bar-delay)`.
-  - Must stay visible when the page is scrolled: `position: sticky; top: 0`. Verify this on a long page (People), because the window scrolls, not `<main>`.
+  - Must stay visible when the page is scrolled. It is `position: fixed` at the top of the viewport, inset by the sidebar's width (`sm:left-60`, mirroring AppShell's `sm:w-60`). Not `sticky`: `<main>` is `overflow-auto`, so a sticky bar would pin to `<main>`, which never scrolls, and would scroll away with the window. (Corrected while planning.)
 - `@media (prefers-reduced-motion: reduce)`: the bar is a static full-width line at 70% and skeletons don't pulse.
 - Follows the design system: indigo is the action colour and there are no shadows.
 
@@ -98,7 +98,10 @@ This round does not make the server faster. That is C.
 
 **5. Five new `loading.tsx` files**, one per route without one:
 
-- `(dashboard)/loading.tsx` (Overview), `customers/loading.tsx`, `funnel/loading.tsx`, `ads/sync-log/loading.tsx`, `settings/users/loading.tsx`.
+- `(dashboard)/(overview)/loading.tsx` (Overview), `customers/loading.tsx`, `funnel/loading.tsx`, `ads/sync-log/loading.tsx`, `settings/users/loading.tsx`.
+- The Overview page moves into a `(overview)` route group (`git mv src/app/(dashboard)/page.tsx src/app/(dashboard)/(overview)/page.tsx`); the URL is unchanged. (Corrected while planning.)
+  - A `loading.tsx` placed directly in `(dashboard)/` would wrap the layout's whole `children`. That boundary is already revealed whenever any dashboard page is on screen, so a transition back to `/` would keep the old page and never show the Overview skeleton.
+  - The route group gives `/` a boundary of its own, like every other page.
 
 Each one:
 - Mirrors its page's top-level layout with the same `BentoGrid`/`BentoTile`/card classes.
@@ -107,7 +110,7 @@ Each one:
 - Carries `aria-busy="true"` on the wrapper.
 - Reserves the real heights so the page doesn't shift when the data lands.
 
-Caveat: `(dashboard)/loading.tsx` also acts as the fallback for any future dashboard route that lacks its own. That is acceptable, and the guard test (below) asserts every page has one.
+No `loading.tsx` sits directly in `(dashboard)/`. The guard test (below) asserts that every dashboard page has its own.
 
 **6. `src/app/(dashboard)/error.tsx`** (client)
 

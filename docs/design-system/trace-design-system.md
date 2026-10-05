@@ -294,7 +294,11 @@ An empty state is a card that teaches — centered, generous padding, muted icon
 
 - **Transitions:** `transition-colors` everywhere; `transition-all` only on cards (border + bg animate together). No durations specified — Tailwind defaults.
 - **Hover = brighten:** raise the alpha (`white/5` → `white/8`, `white/10` → `white/20`), lift the text a rung (`slate-400` → `white`, title → `indigo-300`). Never shadows, never scale.
-- **Loading:** `Loader2`/`CircleDashed` with `animate-spin`; buttons also get `disabled:opacity-60` and a progressive label.
+- **Loading — buttons:** `Loader2`/`CircleDashed` with `animate-spin`; buttons also get `disabled:opacity-60` and a progressive label. Icon-only form buttons use `SubmitIconButton` (icon → spinner via `useFormStatus`).
+- **Loading — navigation (2026-10-05, `docs/superpowers/specs/2026-10-05-instant-feedback-design.md`):** every click is acknowledged at once.
+  - *Same-page changes* (filters, tabs, rows, client switch): the control switches on click (read active state from `useDestination()`); content fades to `--pending-opacity` after `--pending-dim-delay` (150ms) and a 2px indigo bar runs after `--pending-bar-delay` (400ms); fast responses show neither.
+  - *Page changes*: the route's `loading.tsx` skeleton, built from `@/components/page-skeleton`, with the page's real title; gentle pulse, never shimmer, still under reduced motion.
+  - In dashboard code never import `next/link` or `useRouter` — use `PendingLink` / `usePendingRouter` / `useRunPending` from `@/components/navigation/pending-navigation`. Every dashboard page needs its own `loading.tsx`. Both are enforced by `tests/pending-navigation-guard.test.ts`.
 - **No modal pages.** Heavy create/edit flows are full pages with a back arrow; destructive-adjacent flows get their own route. URL-driven right-anchored **sheets** (base-ui Dialog positioned right, opened by a search param) are the dashboard's idiom for drill-downs *and* lightweight entry — customer sheet, day drill-down, record payment (2026-09-21).
 - **Optimistic copy:** clipboard writes assume success, show confirmation, revert after 2s.
 
